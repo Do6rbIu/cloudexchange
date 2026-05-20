@@ -1,0 +1,7 @@
+# Radicale htpasswd file for bcrypt
+# Generate entries with:
+#   docker run --rm tomsquest/docker-radicale htpasswd -nbB user pass
+# Then commit the resulting line below.
+# This file is intentionally non-empty so the auth backend boots; replace
+# the demo line below with real users before exposing the service.
+demo@cloudexchange.local:$2y$05$h2WJZx9eEMzVqRJ8ON/D8.U4MZGT5p8RbCmqzCV1qMNkN8cKLAOJW

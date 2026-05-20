@@ -1,0 +1,109 @@
+name: cloudexchange
+
+services:
+  # ────────────────────────────────────────────────────────────────────
+  # Mail backbone: Postfix (SMTP) + Dovecot (IMAP)
+  # Drop-in replacement for the equivalent role inside grommunio (gromox).
+  # In production, point BFF at a real grommunio host via env vars.
+  # ────────────────────────────────────────────────────────────────────
+  mailserver:
+    image: mailserver/docker-mailserver:14.0.0
+    hostname: mail.cloudexchange.local
+    container_name: cx-mail
+    environment:
+      - ENABLE_SPAMASSASSIN=0
+      - ENABLE_CLAMAV=0
+      - ENABLE_FAIL2BAN=0
+      - ENABLE_OPENDKIM=0
+      - ENABLE_OPENDMARC=0
+      - ENABLE_POLICYD_SPF=0
+      - ENABLE_POSTGREY=0
+      - ENABLE_AMAVIS=0
+      - ENABLE_RSPAMD=0
+      - PERMIT_DOCKER=connected-networks
+      - SSL_TYPE=
+      - POSTFIX_MESSAGE_SIZE_LIMIT=52428800
+      - LOG_LEVEL=info
+    ports:
+      - "1025:25"     # SMTP
+      - "1143:143"    # IMAP
+      - "1465:465"    # SMTPS (submission)
+      - "1587:587"    # Submission
+      - "1993:993"    # IMAPS
+    volumes:
+      - ./infra/mail/data:/var/mail
+      - ./infra/mail/state:/var/mail-state
+      - ./infra/mail/logs:/var/log/mail
+      - ./infra/mail/config:/tmp/docker-mailserver
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
+  # Calendar + contacts: Radicale (CalDAV + CardDAV)
+  # Grommunio bundles the same protocols via gromox; this gives us the
+  # same wire-level interface in dev.
+  # ────────────────────────────────────────────────────────────────────
+  radicale:
+    image: tomsquest/docker-radicale:3.2.3.0
+    container_name: cx-radicale
+    ports:
+      - "5232:5232"
+    volumes:
+      - ./infra/radicale/data:/data
+      - ./infra/radicale/config:/config:ro
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
+  # BFF — bridges browser ↔ mail backbone via IMAP/SMTP/CalDAV/CardDAV
+  # ────────────────────────────────────────────────────────────────────
+  bff:
+    build:
+      context: ./bff
+      dockerfile: Dockerfile
+    container_name: cx-bff
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+      - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
+      - IMAP_HOST=mailserver
+      - IMAP_PORT=143
+      - IMAP_SECURE=false
+      - SMTP_HOST=mailserver
+      - SMTP_PORT=587
+      - SMTP_SECURE=false
+      - CALDAV_URL=http://radicale:5232
+      - CARDDAV_URL=http://radicale:5232
+      - CORS_ORIGIN=http://localhost:8080
+    ports:
+      - "4000:4000"
+    depends_on:
+      - mailserver
+      - radicale
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
+  # Frontend — Vite-built React/TS app served by nginx
+  # ────────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: /api
+    container_name: cx-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - bff
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+networks:
+  cxnet:
+    driver: bridge
