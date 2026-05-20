@@ -28,25 +28,37 @@ Postfix + Dovecot + Radicale (dev).
   оригинальный design-canvas из v0 проекта. Оставлен как референс для
   дальнейшей доработки UI.
 
-## Быстрый старт (dev-окружение)
+## Быстрый старт — демо-режим (одной командой)
 
 ```bash
-# 1. Конфиг
-cp .env.example .env
-# Подставьте сильный SESSION_SECRET (например: openssl rand -hex 32)
-
-# 2. Запуск стека
-docker compose up -d --build
-
-# 3. Создать тестовый ящик и Radicale-пользователя
-./scripts/setup-mailbox.sh user@cloudexchange.local hunter2
-
-# 4. Открыть в браузере
+cp .env.example .env  # подставьте SESSION_SECRET
+./scripts/bootstrap-demo.sh
 open http://localhost:8080
 ```
 
-После шага 4 откроется LoginPage. Введите учётные данные, созданные на
-шаге 3, — BFF проверит их через IMAP-бинд и положит сессию в cookie.
+Скрипт сам поднимет стек, создаст демо-ящик `igor.petrov@cloudexchange.local`
+с паролем `cloud24demo` и наполнит его реалистичными данными из дизайн-канваса:
+
+- **12 писем во "Входящих"** от разных корреспондентов (партнёры Газпром-Tech и
+  Сбер, коллеги по Cloud24, HR, Security, бухгалтерия), 3 непрочитанных, 2 со
+  вложениями.
+- **2 письма в "Отправленных"**.
+- **10 контактов** с телефонами, должностями и заметками.
+- **18 событий в календаре** на текущую рабочую неделю.
+
+На странице логина есть кнопка **«Войти как демо-пользователь»** — нажмите её,
+чтобы попасть прямо в Inbox без ввода кредов. Удобно для презентации.
+
+## Быстрый старт — пустое dev-окружение
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+./scripts/setup-mailbox.sh user@cloudexchange.local hunter2
+open http://localhost:8080
+```
+
+BFF проверит креды через IMAP-бинд и положит сессию в cookie.
 
 ## Сервисы и порты
 
@@ -137,7 +149,11 @@ cloudexchange/
 ├── docker-compose.yml
 ├── .env.example
 ├── scripts/
+│   ├── bootstrap-demo.sh     # одна команда: стек + ящик + демо-данные
 │   └── setup-mailbox.sh
+├── seed/                     # Node-скрипт наполнения сервера демо-данными
+│   ├── src/{index,data}.ts
+│   └── Dockerfile
 ├── frontend/                 # Vite + React + TS — рабочее приложение
 │   ├── src/
 │   │   ├── api/

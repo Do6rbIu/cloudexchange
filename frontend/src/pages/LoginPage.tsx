@@ -1,14 +1,19 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../store/auth';
+import { useTheme } from '../store/theme';
 import { Icon } from '../components/shared/Icon';
-import { lightTheme } from '../components/shared/theme';
+
+const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL ?? '';
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD ?? '';
+const HAS_DEMO = Boolean(DEMO_EMAIL && DEMO_PASSWORD);
 
 export function LoginPage() {
   const { login, status } = useAuth();
+  const { theme: t, dark, toggle } = useTheme();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState(HAS_DEMO ? DEMO_EMAIL : '');
+  const [password, setPassword] = useState(HAS_DEMO ? DEMO_PASSWORD : '');
   const [displayName, setDisplayName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,12 +23,11 @@ export function LoginPage() {
     return null;
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function submitWith(emailValue: string, passwordValue: string, nameValue?: string) {
     setSubmitting(true);
     setError(null);
     try {
-      await login({ email, password, displayName: displayName || undefined });
+      await login({ email: emailValue, password: passwordValue, displayName: nameValue });
       navigate('/inbox', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось войти');
@@ -32,7 +36,14 @@ export function LoginPage() {
     }
   }
 
-  const t = lightTheme;
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    await submitWith(email, password, displayName || undefined);
+  }
+
+  async function onDemoClick() {
+    await submitWith(DEMO_EMAIL, DEMO_PASSWORD, 'Игорь Петров');
+  }
 
   return (
     <div
@@ -42,6 +53,7 @@ export function LoginPage() {
         gridTemplateColumns: '1fr 480px',
         background: t.bg,
         fontFamily: 'Inter, sans-serif',
+        color: t.text,
       }}
     >
       <div
@@ -53,15 +65,41 @@ export function LoginPage() {
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
+          position: 'relative',
+          overflow: 'hidden',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: '#A8B8FF' }}>
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: -80,
+            right: -80,
+            width: 320,
+            height: 320,
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(45,79,224,0.45) 0%, transparent 70%)',
+          }}
+        />
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            bottom: -120,
+            left: -120,
+            width: 400,
+            height: 400,
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(122,79,224,0.25) 0%, transparent 70%)',
+          }}
+        />
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, color: '#A8B8FF' }}>
           <Icon name="logo" size={28} />
           <span style={{ fontSize: 12, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>
             Cloud24 Exchange
           </span>
         </div>
-        <div>
+        <div style={{ position: 'relative' }}>
           <h1 style={{ fontSize: 44, lineHeight: 1.15, letterSpacing: -1, fontWeight: 600, margin: 0 }}>
             Корпоративная почта<br />и календарь —<br />в защищённом контуре
           </h1>
@@ -69,11 +107,36 @@ export function LoginPage() {
             Альтернатива Microsoft Exchange на базе открытых протоколов IMAP, SMTP,
             CalDAV и CardDAV. Совместима с grommunio в роли почтового ядра.
           </p>
+          <div style={{ display: 'flex', gap: 24, marginTop: 32, color: '#A39B89', fontSize: 13 }}>
+            <Stat label="Экранов" value="6" />
+            <Stat label="Протоколов" value="4" />
+            <Stat label="Без vendor lock-in" value="✓" />
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: '#6B6557' }}>© Cloud24 · 2026</div>
+        <div style={{ position: 'relative', fontSize: 12, color: '#6B6557' }}>© Cloud24 · 2026</div>
       </div>
 
-      <div style={{ display: 'grid', placeItems: 'center', padding: 48 }}>
+      <div style={{ display: 'grid', placeItems: 'center', padding: 48, position: 'relative' }}>
+        <button
+          type="button"
+          onClick={toggle}
+          title={dark ? 'Светлая тема' : 'Тёмная тема'}
+          style={{
+            position: 'absolute',
+            top: 20,
+            right: 20,
+            background: 'transparent',
+            border: `1px solid ${t.border}`,
+            borderRadius: 8,
+            padding: '6px 10px',
+            cursor: 'pointer',
+            color: t.textMuted,
+            fontSize: 11,
+            fontFamily: 'inherit',
+          }}
+        >
+          {dark ? '☀ Светлая' : '☾ Тёмная'}
+        </button>
         <form
           onSubmit={onSubmit}
           style={{
@@ -91,7 +154,7 @@ export function LoginPage() {
             <h2 style={{ fontSize: 26, margin: '8px 0 0', letterSpacing: -0.4 }}>Добро пожаловать</h2>
           </div>
 
-          <Field label="Email">
+          <Field label="Email" t={t}>
             <input
               type="email"
               autoComplete="username"
@@ -103,7 +166,7 @@ export function LoginPage() {
             />
           </Field>
 
-          <Field label="Пароль">
+          <Field label="Пароль" t={t}>
             <input
               type="password"
               autoComplete="current-password"
@@ -114,7 +177,7 @@ export function LoginPage() {
             />
           </Field>
 
-          <Field label="Отображаемое имя (необязательно)">
+          <Field label="Отображаемое имя (необязательно)" t={t}>
             <input
               type="text"
               value={displayName}
@@ -129,7 +192,7 @@ export function LoginPage() {
               style={{
                 fontSize: 13,
                 color: t.danger,
-                background: '#FBE8E5',
+                background: dark ? '#3A1F1B' : '#FBE8E5',
                 padding: '10px 12px',
                 borderRadius: 8,
                 border: `1px solid ${t.danger}33`,
@@ -152,14 +215,41 @@ export function LoginPage() {
               borderRadius: 8,
               cursor: submitting ? 'progress' : 'pointer',
               transition: 'background 0.15s',
+              fontFamily: 'inherit',
             }}
           >
             {submitting ? 'Входим…' : 'Войти'}
           </button>
 
+          {HAS_DEMO && (
+            <button
+              type="button"
+              onClick={onDemoClick}
+              disabled={submitting}
+              style={{
+                padding: '10px 16px',
+                fontSize: 13,
+                fontWeight: 500,
+                color: t.accent,
+                background: t.accentSoft,
+                border: `1px solid ${t.accent}33`,
+                borderRadius: 8,
+                cursor: submitting ? 'progress' : 'pointer',
+                fontFamily: 'inherit',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Icon name="user" size={14} />
+              Войти как демо-пользователь (Игорь Петров)
+            </button>
+          )}
+
           <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.6 }}>
             Учётные данные используются для входа в IMAP/SMTP-сервер. В dev-окружении
-            создайте ящик через инфраструктурный скрипт <code>scripts/setup-mailbox.sh</code>.
+            создайте ящик через <code style={{ background: t.surfaceAlt, padding: '1px 6px', borderRadius: 4 }}>scripts/bootstrap-demo.sh</code>.
           </div>
         </form>
       </div>
@@ -167,10 +257,21 @@ export function LoginPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: '#F0EBE0' }}>{value}</div>
+      <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: 'uppercase', marginTop: 4 }}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children, t }: { label: string; children: React.ReactNode; t: ReturnType<typeof useTheme>['theme'] }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 11, fontWeight: 600, color: '#6B6557', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 1.2 }}>
         {label}
       </span>
       {children}
@@ -178,7 +279,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function inputStyle(t: typeof lightTheme): React.CSSProperties {
+function inputStyle(t: ReturnType<typeof useTheme>['theme']): React.CSSProperties {
   return {
     padding: '10px 12px',
     fontSize: 14,

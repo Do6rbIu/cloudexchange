@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { calendarApi } from '../api/calendar';
 import type { CalendarEvent, CalendarSummary } from '../types/api';
-import { lightTheme } from '../components/shared/theme';
+import { useTheme } from '../store/theme';
+import type { Theme } from '../components/shared/theme';
 
 function startOfWeek(d: Date): Date {
   const day = (d.getDay() + 6) % 7;
@@ -30,7 +31,7 @@ export function CalendarPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const t = lightTheme;
+  const { theme: t } = useTheme();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -173,7 +174,7 @@ function Hour({
   hour: number;
   days: Date[];
   eventsForDay: (d: Date) => CalendarEvent[];
-  t: typeof lightTheme;
+  t: Theme;
 }) {
   return (
     <>
@@ -237,7 +238,7 @@ function EventForm({
   calendars: CalendarSummary[];
   onClose: () => void;
   onSaved: () => void;
-  t: typeof lightTheme;
+  t: Theme;
 }) {
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
@@ -340,7 +341,7 @@ function EventForm({
   );
 }
 
-function Lbl({ children, t }: { children: React.ReactNode; t: typeof lightTheme }) {
+function Lbl({ children, t }: { children: React.ReactNode; t: Theme }) {
   return (
     <span style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 1.2 }}>
       {children}
@@ -348,7 +349,7 @@ function Lbl({ children, t }: { children: React.ReactNode; t: typeof lightTheme 
   );
 }
 
-function inp(t: typeof lightTheme): React.CSSProperties {
+function inp(t: Theme): React.CSSProperties {
   return {
     padding: '8px 10px',
     fontSize: 13,
@@ -360,7 +361,7 @@ function inp(t: typeof lightTheme): React.CSSProperties {
   };
 }
 
-function navBtn(t: typeof lightTheme): React.CSSProperties {
+function navBtn(t: Theme): React.CSSProperties {
   return {
     padding: '6px 12px',
     background: t.surface,
@@ -373,7 +374,7 @@ function navBtn(t: typeof lightTheme): React.CSSProperties {
   };
 }
 
-function primaryBtn(t: typeof lightTheme): React.CSSProperties {
+function primaryBtn(t: Theme): React.CSSProperties {
   return {
     padding: '6px 14px',
     background: t.accent,

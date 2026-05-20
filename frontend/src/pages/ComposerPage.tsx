@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { mailApi } from '../api/mail';
-import { lightTheme } from '../components/shared/theme';
+import { useTheme } from '../store/theme';
+import type { Theme } from '../components/shared/theme';
+import { Icon } from '../components/shared/Icon';
 
 interface ComposerState {
   to?: string;
@@ -14,6 +16,7 @@ interface ComposerState {
 export function ComposerPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { theme: t } = useTheme();
   const initial = (location.state ?? {}) as ComposerState;
 
   const [to, setTo] = useState(initial.to ?? '');
@@ -27,7 +30,6 @@ export function ComposerPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const t = lightTheme;
 
   function parseAddressList(input: string): string[] {
     return input
@@ -50,7 +52,7 @@ export function ComposerPage() {
         inReplyTo: initial.inReplyTo ?? undefined,
         references: initial.references,
       });
-      setSuccess(`Письмо отправлено (id: ${result.messageId})`);
+      setSuccess(`Письмо отправлено. ID: ${result.messageId}`);
       setTimeout(() => navigate('/inbox'), 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось отправить');
@@ -60,7 +62,28 @@ export function ComposerPage() {
   }
 
   return (
-    <div style={{ height: '100%', overflow: 'auto', background: t.bg }}>
+    <div style={{ height: '100%', overflow: 'auto', background: t.bg, color: t.text }}>
+      <header
+        style={{
+          padding: '16px 32px',
+          borderBottom: `1px solid ${t.border}`,
+          background: t.surface,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 600 }}>{initial.subject ? 'Ответ на письмо' : 'Новое письмо'}</div>
+          <div style={{ fontSize: 12, color: t.textMuted }}>
+            Письмо будет отправлено через SMTP-сервер с вашими IMAP-кредами
+          </div>
+        </div>
+        <button type="button" onClick={() => navigate(-1)} style={secondaryBtn(t)}>
+          Отмена
+        </button>
+      </header>
+
       <form
         onSubmit={onSubmit}
         style={{
@@ -75,9 +98,7 @@ export function ComposerPage() {
           gap: 14,
         }}
       >
-        <h2 style={{ fontSize: 20, margin: 0, fontWeight: 600 }}>Новое письмо</h2>
-
-        <Row label="Кому">
+        <Row label="Кому" t={t}>
           <input
             type="text"
             required
@@ -87,7 +108,7 @@ export function ComposerPage() {
             style={inputStyle(t)}
           />
         </Row>
-        <Row label="Копия">
+        <Row label="Копия" t={t}>
           <input
             type="text"
             value={cc}
@@ -96,7 +117,7 @@ export function ComposerPage() {
             style={inputStyle(t)}
           />
         </Row>
-        <Row label="Тема">
+        <Row label="Тема" t={t}>
           <input
             type="text"
             required
@@ -105,25 +126,31 @@ export function ComposerPage() {
             style={inputStyle(t)}
           />
         </Row>
-        <Row label="Сообщение">
+        <Row label="Сообщение" t={t}>
           <textarea
             required
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={14}
-            style={{ ...inputStyle(t), resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.55 }}
+            style={{
+              ...inputStyle(t),
+              resize: 'vertical',
+              fontFamily: 'inherit',
+              lineHeight: 1.55,
+            }}
           />
         </Row>
 
-        {error && <Notice color={t.danger} bg="#FBE8E5">{error}</Notice>}
-        {success && <Notice color={t.success} bg="#E3F4EC">{success}</Notice>}
+        {error && <Notice color={t.danger} bg="rgba(192,57,43,0.12)">{error}</Notice>}
+        {success && <Notice color={t.success} bg="rgba(31,138,91,0.14)">{success}</Notice>}
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button type="button" onClick={() => navigate(-1)} style={secondaryBtn(t)}>
             Отмена
           </button>
           <button type="submit" disabled={sending} style={primaryBtn(t, sending)}>
-            {sending ? 'Отправляем…' : 'Отправить'}
+            <Icon name="send" size={14} color="#FFF" />
+            <span style={{ marginLeft: 6 }}>{sending ? 'Отправляем…' : 'Отправить'}</span>
           </button>
         </div>
       </form>
@@ -131,10 +158,10 @@ export function ComposerPage() {
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, children, t }: { label: string; children: React.ReactNode; t: Theme }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: '#6B6557', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 1.2 }}>
         {label}
       </span>
       {children}
@@ -142,7 +169,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function inputStyle(t: typeof lightTheme): React.CSSProperties {
+function inputStyle(t: Theme): React.CSSProperties {
   return {
     padding: '10px 12px',
     fontSize: 14,
@@ -155,7 +182,7 @@ function inputStyle(t: typeof lightTheme): React.CSSProperties {
   };
 }
 
-function primaryBtn(t: typeof lightTheme, busy: boolean): React.CSSProperties {
+function primaryBtn(t: Theme, busy: boolean): React.CSSProperties {
   return {
     padding: '10px 18px',
     background: busy ? t.textDim : t.accent,
@@ -166,10 +193,12 @@ function primaryBtn(t: typeof lightTheme, busy: boolean): React.CSSProperties {
     fontWeight: 600,
     cursor: busy ? 'progress' : 'pointer',
     fontFamily: 'inherit',
+    display: 'inline-flex',
+    alignItems: 'center',
   };
 }
 
-function secondaryBtn(t: typeof lightTheme): React.CSSProperties {
+function secondaryBtn(t: Theme): React.CSSProperties {
   return {
     padding: '10px 16px',
     background: 'transparent',
