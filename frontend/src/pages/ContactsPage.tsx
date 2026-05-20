@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { contactsApi } from '../api/contacts';
 import type { Contact } from '../types/api';
-import { lightTheme } from '../components/shared/theme';
+import { useTheme } from '../store/theme';
+import type { Theme } from '../components/shared/theme';
 import { colorFor, initialsOf } from '../components/shared/format';
 
 export function ContactsPage() {
@@ -11,7 +12,7 @@ export function ContactsPage() {
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<Contact | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const t = lightTheme;
+  const { theme: t } = useTheme();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -230,7 +231,7 @@ export function ContactsPage() {
   );
 }
 
-function Section({ label, children, t }: { label: string; children: React.ReactNode; t: typeof lightTheme }) {
+function Section({ label, children, t }: { label: string; children: React.ReactNode; t: Theme }) {
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6 }}>
@@ -248,7 +249,7 @@ function ContactForm({
 }: {
   onClose: () => void;
   onSaved: () => void;
-  t: typeof lightTheme;
+  t: Theme;
 }) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -322,7 +323,7 @@ function ContactForm({
   );
 }
 
-function Lbl({ children, t }: { children: React.ReactNode; t: typeof lightTheme }) {
+function Lbl({ children, t }: { children: React.ReactNode; t: Theme }) {
   return (
     <span style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 1.2 }}>
       {children}
@@ -330,7 +331,7 @@ function Lbl({ children, t }: { children: React.ReactNode; t: typeof lightTheme 
   );
 }
 
-function inp(t: typeof lightTheme): React.CSSProperties {
+function inp(t: Theme): React.CSSProperties {
   return {
     padding: '8px 10px',
     fontSize: 13,
@@ -342,7 +343,7 @@ function inp(t: typeof lightTheme): React.CSSProperties {
   };
 }
 
-function navBtn(t: typeof lightTheme): React.CSSProperties {
+function navBtn(t: Theme): React.CSSProperties {
   return {
     padding: '6px 12px',
     background: t.surface,
@@ -355,7 +356,7 @@ function navBtn(t: typeof lightTheme): React.CSSProperties {
   };
 }
 
-function primaryBtn(t: typeof lightTheme): React.CSSProperties {
+function primaryBtn(t: Theme): React.CSSProperties {
   return {
     padding: '6px 14px',
     background: t.accent,
@@ -369,7 +370,7 @@ function primaryBtn(t: typeof lightTheme): React.CSSProperties {
   };
 }
 
-function dangerBtn(t: typeof lightTheme): React.CSSProperties {
+function dangerBtn(t: Theme): React.CSSProperties {
   return {
     padding: '8px 14px',
     background: 'transparent',

@@ -95,12 +95,41 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE: /api
+        VITE_DEMO_EMAIL: ${DEMO_EMAIL:-igor.petrov@cloudexchange.local}
+        VITE_DEMO_PASSWORD: ${DEMO_PASSWORD:-cloud24demo}
     container_name: cx-frontend
     ports:
       - "8080:80"
     depends_on:
       - bff
     restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
+  # Demo data seeder — runs once to populate INBOX, contacts and events
+  # with realistic Cloud24 sample data. Enable with --profile demo.
+  # ────────────────────────────────────────────────────────────────────
+  seed:
+    build:
+      context: ./seed
+      dockerfile: Dockerfile
+    container_name: cx-seed
+    profiles:
+      - demo
+    environment:
+      - IMAP_HOST=mailserver
+      - IMAP_PORT=143
+      - IMAP_SECURE=false
+      - CALDAV_URL=http://radicale:5232
+      - CARDDAV_URL=http://radicale:5232
+      - DEMO_EMAIL=${DEMO_EMAIL:-igor.petrov@cloudexchange.local}
+      - DEMO_PASSWORD=${DEMO_PASSWORD:-cloud24demo}
+      - DEMO_DISPLAY_NAME=${DEMO_DISPLAY_NAME:-Игорь Петров}
+    depends_on:
+      - mailserver
+      - radicale
+    restart: "no"
     networks:
       - cxnet
 

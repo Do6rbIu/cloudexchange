@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { mailApi } from '../api/mail';
 import { ApiError } from '../api/client';
+import { useTheme } from '../store/theme';
 import type { MailboxSummary, MessageDetail, MessageSummary } from '../types/api';
 import { Icon } from '../components/shared/Icon';
-import { lightTheme } from '../components/shared/theme';
+import type { Theme } from '../components/shared/theme';
 import { colorFor, formatMessageTime, formatMessageTimeFull, initialsOf } from '../components/shared/format';
 
 const SYSTEM_FOLDERS: Array<{ path: string; label: string; icon: string }> = [
@@ -21,6 +22,7 @@ export function InboxPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const mailbox = searchParams.get('mailbox') ?? 'INBOX';
+  const { theme: t } = useTheme();
 
   const [folders, setFolders] = useState<MailboxSummary[]>([]);
   const [messages, setMessages] = useState<MessageSummary[]>([]);
@@ -28,8 +30,8 @@ export function InboxPage() {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
-  const t = lightTheme;
   const selectedUid = params.uid ? Number(params.uid) : null;
 
   const refreshFolders = useCallback(async () => {
@@ -72,7 +74,12 @@ export function InboxPage() {
     mailApi
       .message(selectedUid, mailbox)
       .then((d) => {
-        if (!cancelled) setDetail(d);
+        if (!cancelled) {
+          setDetail(d);
+          // After reading, refresh folder counts so the unread badge drops.
+          void refreshFolders();
+          setMessages((prev) => prev.map((m) => (m.uid === selectedUid ? { ...m, unread: false } : m)));
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Письмо не найдено');
@@ -83,9 +90,18 @@ export function InboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedUid, mailbox]);
+  }, [selectedUid, mailbox, refreshFolders]);
 
-  const knownFolderPaths = useMemo(() => new Set(folders.map((f) => f.path)), [folders]);
+  const filtered = useMemo(() => {
+    if (!query) return messages;
+    const q = query.toLowerCase();
+    return messages.filter((m) =>
+      [m.subject, m.preview, m.from?.name ?? '', m.from?.address ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [messages, query]);
 
   function openFolder(path: string) {
     setSearchParams({ mailbox: path });
@@ -93,10 +109,12 @@ export function InboxPage() {
   }
 
   async function onToggleFlag(uid: number, flagged: boolean) {
+    setMessages((prev) => prev.map((m) => (m.uid === uid ? { ...m, flagged: !flagged } : m)));
     try {
       await mailApi.setFlags(uid, ['\\Flagged'], !flagged, mailbox);
-      setMessages((prev) => prev.map((m) => (m.uid === uid ? { ...m, flagged: !flagged } : m)));
     } catch (err) {
+      // Roll back on failure.
+      setMessages((prev) => prev.map((m) => (m.uid === uid ? { ...m, flagged } : m)));
       setError(err instanceof Error ? err.message : 'Не удалось обновить флаг');
     }
   }
@@ -106,6 +124,7 @@ export function InboxPage() {
       await mailApi.remove(uid, mailbox);
       setMessages((prev) => prev.filter((m) => m.uid !== uid));
       if (selectedUid === uid) navigate(`/inbox?mailbox=${encodeURIComponent(mailbox)}`);
+      void refreshFolders();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить письмо');
     }
@@ -115,7 +134,7 @@ export function InboxPage() {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '240px 360px 1fr',
+        gridTemplateColumns: '240px 380px 1fr',
         height: '100%',
         overflow: 'hidden',
       }}
@@ -129,13 +148,35 @@ export function InboxPage() {
           overflowY: 'auto',
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 12 }}>
-          Папки
-        </div>
+        <button
+          type="button"
+          onClick={() => navigate('/compose')}
+          style={{
+            width: '100%',
+            padding: '10px 14px',
+            background: t.accent,
+            color: '#FFF',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            marginBottom: 18,
+            fontFamily: 'inherit',
+          }}
+        >
+          <Icon name="plus" size={14} color="#FFF" />
+          Написать
+        </button>
+
+        <div style={sectionLabelStyle(t)}>Папки</div>
         {SYSTEM_FOLDERS.map((sys) => {
           const meta = folders.find((f) => f.path === sys.path);
           const active = mailbox === sys.path;
-          if (!meta && !knownFolderPaths.size) return null;
           return (
             <button
               key={sys.path}
@@ -163,30 +204,20 @@ export function InboxPage() {
           );
         })}
 
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: t.textMuted,
-            textTransform: 'uppercase',
-            letterSpacing: 1.4,
-            marginTop: 20,
-            marginBottom: 8,
-          }}
-        >
-          Другие
-        </div>
-        {folders
-          .filter((f) => !SYSTEM_FOLDERS.some((s) => s.path === f.path))
-          .map((f) => (
-            <button key={f.path} type="button" onClick={() => openFolder(f.path)} style={folderButtonStyle(mailbox === f.path, t)}>
-              <Icon name="archive" size={15} />
-              <span style={{ flex: 1, textAlign: 'left' }}>{f.name}</span>
-              {f.unread > 0 && (
-                <span style={{ fontSize: 11, color: t.textMuted }}>{f.unread}</span>
-              )}
-            </button>
-          ))}
+        {folders.filter((f) => !SYSTEM_FOLDERS.some((s) => s.path === f.path)).length > 0 && (
+          <>
+            <div style={{ ...sectionLabelStyle(t), marginTop: 18 }}>Другие</div>
+            {folders
+              .filter((f) => !SYSTEM_FOLDERS.some((s) => s.path === f.path))
+              .map((f) => (
+                <button key={f.path} type="button" onClick={() => openFolder(f.path)} style={folderButtonStyle(mailbox === f.path, t)}>
+                  <Icon name="archive" size={15} />
+                  <span style={{ flex: 1, textAlign: 'left' }}>{f.name}</span>
+                  {f.unread > 0 && <span style={{ fontSize: 11, color: t.textMuted }}>{f.unread}</span>}
+                </button>
+              ))}
+          </>
+        )}
       </aside>
 
       {/* Message list */}
@@ -201,35 +232,53 @@ export function InboxPage() {
       >
         <header
           style={{
-            padding: '16px 20px',
+            padding: '14px 18px',
             borderBottom: `1px solid ${t.border}`,
+            background: t.surface,
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 8,
+            flexDirection: 'column',
+            gap: 10,
           }}
         >
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 600 }}>
-              {SYSTEM_FOLDERS.find((s) => s.path === mailbox)?.label ?? mailbox}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 600 }}>
+                {SYSTEM_FOLDERS.find((s) => s.path === mailbox)?.label ?? mailbox}
+              </div>
+              <div style={{ fontSize: 11, color: t.textMuted }}>
+                {filtered.length} из {messages.length} {pluralRu(messages.length, ['письмо', 'письма', 'писем'])}
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: t.textMuted }}>
-              {messages.length} {pluralRu(messages.length, ['письмо', 'письма', 'писем'])}
-            </div>
+            <button type="button" onClick={refreshList} style={iconBtnStyle(t)} title="Обновить">
+              ↻
+            </button>
           </div>
-          <button type="button" onClick={refreshList} style={iconBtnStyle(t)}>
-            Обновить
-          </button>
+          <input
+            type="search"
+            placeholder="Поиск по теме, отправителю, превью…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{
+              padding: '7px 10px',
+              fontSize: 12,
+              fontFamily: 'inherit',
+              background: t.bg,
+              border: `1px solid ${t.border}`,
+              borderRadius: 6,
+              color: t.text,
+              outline: 'none',
+            }}
+          />
         </header>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {loadingList && messages.length === 0 && (
-            <div style={{ padding: 32, color: t.textMuted }}>Загружаем письма…</div>
+          {loadingList && messages.length === 0 && <MessageListSkeleton t={t} />}
+          {!loadingList && filtered.length === 0 && (
+            <div style={{ padding: 32, color: t.textMuted, fontSize: 13, textAlign: 'center' }}>
+              {query ? 'Ничего не найдено' : 'В этой папке пусто'}
+            </div>
           )}
-          {!loadingList && messages.length === 0 && (
-            <div style={{ padding: 32, color: t.textMuted }}>В этой папке пусто</div>
-          )}
-          {messages.map((m) => {
+          {filtered.map((m) => {
             const isActive = selectedUid === m.uid;
             return (
               <button
@@ -241,6 +290,7 @@ export function InboxPage() {
                   textAlign: 'left',
                   padding: '12px 16px',
                   background: isActive ? t.accentSoft : 'transparent',
+                  borderLeft: `3px solid ${isActive ? t.accent : 'transparent'}`,
                   border: 'none',
                   borderBottom: `1px solid ${t.border}`,
                   display: 'grid',
@@ -314,7 +364,7 @@ export function InboxPage() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {m.preview || '(нет превью)'}
+                    {m.preview || '—'}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -363,20 +413,42 @@ export function InboxPage() {
           </div>
         )}
         {!detail && !loadingDetail && (
-          <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: t.textMuted, padding: 32 }}>
-            Выберите письмо для чтения
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexDirection: 'column',
+              gap: 12,
+              color: t.textMuted,
+              padding: 32,
+            }}
+          >
+            <div
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 16,
+                background: t.accentSoft,
+                color: t.accent,
+                display: 'grid',
+                placeItems: 'center',
+              }}
+            >
+              <Icon name="inbox" size={28} />
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 500 }}>Выберите письмо для чтения</div>
+            <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 320 }}>
+              Слева отображаются последние 50 писем из выбранной папки. Поиск работает по теме,
+              отправителю и превью.
+            </div>
           </div>
         )}
-        {loadingDetail && (
-          <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: t.textMuted, padding: 32 }}>
-            Открываем письмо…
-          </div>
-        )}
+        {loadingDetail && <ReadingSkeleton t={t} />}
         {detail && (
           <article style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
-            <h1 style={{ fontSize: 22, lineHeight: 1.3, fontWeight: 600, margin: 0 }}>
-              {detail.subject}
-            </h1>
+            <h1 style={{ fontSize: 22, lineHeight: 1.3, fontWeight: 600, margin: 0 }}>{detail.subject}</h1>
             <div
               style={{
                 display: 'flex',
@@ -397,18 +469,19 @@ export function InboxPage() {
                   fontSize: 14,
                   display: 'grid',
                   placeItems: 'center',
+                  flexShrink: 0,
                 }}
               >
                 {initialsOf(detail.from?.name || detail.from?.address)}
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600 }}>{detail.from?.name || detail.from?.address}</div>
                 <div style={{ fontSize: 12, color: t.textMuted }}>{detail.from?.address}</div>
                 <div style={{ fontSize: 12, color: t.textMuted, marginTop: 4 }}>
                   Кому: {detail.to.map((a) => a.address).join(', ') || '—'}
                 </div>
               </div>
-              <div style={{ textAlign: 'right' }}>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
                 <div style={{ fontSize: 12, color: t.textMuted }}>{formatMessageTimeFull(detail.date)}</div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, justifyContent: 'flex-end' }}>
                   <button
@@ -438,10 +511,8 @@ export function InboxPage() {
             <div style={{ fontSize: 14, lineHeight: 1.65, color: t.text, marginTop: 18 }}>
               {detail.html ? (
                 <div
-                  // The IMAP backend's mail body is the email we just received; we
-                  // intentionally render the original HTML so users see formatting
-                  // and inline images. In production, route through a sanitizer
-                  // (e.g. DOMPurify) at this boundary.
+                  // Display original HTML so users see formatting and inline images.
+                  // Production deployments must route through a sanitizer (DOMPurify).
                   dangerouslySetInnerHTML={{ __html: detail.html }}
                 />
               ) : (
@@ -453,9 +524,7 @@ export function InboxPage() {
 
             {detail.attachments.length > 0 && (
               <div style={{ marginTop: 24 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 1.4 }}>
-                  Вложения ({detail.attachments.length})
-                </div>
+                <div style={sectionLabelStyle(t)}>Вложения ({detail.attachments.length})</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
                   {detail.attachments.map((a, i) => (
                     <div
@@ -486,7 +555,54 @@ export function InboxPage() {
   );
 }
 
-function folderButtonStyle(active: boolean, t: typeof lightTheme): React.CSSProperties {
+function MessageListSkeleton({ t }: { t: Theme }) {
+  return (
+    <div style={{ padding: 12 }}>
+      {[...Array(6)].map((_, i) => (
+        <div
+          key={i}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '32px 1fr',
+            gap: 10,
+            padding: '10px 4px',
+            opacity: 0.6 - i * 0.07,
+          }}
+        >
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: t.surfaceAlt }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ height: 11, width: '60%', background: t.surfaceAlt, borderRadius: 4 }} />
+            <div style={{ height: 11, width: '80%', background: t.surfaceAlt, borderRadius: 4 }} />
+            <div style={{ height: 9, width: '40%', background: t.surfaceAlt, borderRadius: 4 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReadingSkeleton({ t }: { t: Theme }) {
+  return (
+    <div style={{ padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ height: 24, width: '60%', background: t.surfaceAlt, borderRadius: 6 }} />
+      <div style={{ height: 14, width: '40%', background: t.surfaceAlt, borderRadius: 4, marginTop: 8 }} />
+      <div style={{ height: 1, background: t.border, margin: '12px 0' }} />
+      {[...Array(8)].map((_, i) => (
+        <div
+          key={i}
+          style={{
+            height: 12,
+            width: i % 3 === 0 ? '90%' : i % 3 === 1 ? '75%' : '85%',
+            background: t.surfaceAlt,
+            borderRadius: 4,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function folderButtonStyle(active: boolean, t: Theme): React.CSSProperties {
   return {
     width: '100%',
     display: 'flex',
@@ -505,7 +621,7 @@ function folderButtonStyle(active: boolean, t: typeof lightTheme): React.CSSProp
   };
 }
 
-function iconBtnStyle(t: typeof lightTheme): React.CSSProperties {
+function iconBtnStyle(t: Theme): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
@@ -518,6 +634,17 @@ function iconBtnStyle(t: typeof lightTheme): React.CSSProperties {
     cursor: 'pointer',
     color: t.text,
     fontFamily: 'inherit',
+  };
+}
+
+function sectionLabelStyle(t: Theme): React.CSSProperties {
+  return {
+    fontSize: 11,
+    fontWeight: 700,
+    color: t.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1.4,
+    marginBottom: 8,
   };
 }
 

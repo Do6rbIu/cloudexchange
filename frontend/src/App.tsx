@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './store/auth';
+import { useTheme } from './store/theme';
 import { LoginPage } from './pages/LoginPage';
 import { AppShell } from './components/AppShell';
 import { InboxPage } from './pages/InboxPage';
@@ -8,11 +9,36 @@ import { ComposerPage } from './pages/ComposerPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { ContactsPage } from './pages/ContactsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { Icon } from './components/shared/Icon';
 
 function LoadingScreen() {
+  const { theme: t } = useTheme();
   return (
-    <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: '#6B6557' }}>
-      Загружаем сессию…
+    <div
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        height: '100%',
+        background: t.bg,
+        color: t.textMuted,
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            background: `linear-gradient(135deg, ${t.accent}, #7A4FE0)`,
+            color: '#FFF',
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          <Icon name="logo" size={26} color="#FFF" />
+        </div>
+        <div style={{ fontSize: 13 }}>Загружаем сессию Cloud24 Exchange…</div>
+      </div>
     </div>
   );
 }
