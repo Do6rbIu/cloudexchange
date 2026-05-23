@@ -206,6 +206,13 @@ services:
       - CARDDAV_URL=http://sogo:20000/SOGo/dav/
       - CORS_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:8080}
       - TRUST_PROXY=true
+      - MAIL_CONTAINER_NAME=cx-mail
+    # The Docker socket is mounted read/write so the admin user-provisioning
+    # path can `setup email add` inside the mailserver container. This is
+    # the deliberate compromise of Phase 2.5; Phase 3 swaps it for an LDAP
+    # provisioner.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

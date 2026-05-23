@@ -125,8 +125,11 @@ end-to-end и было пригодно для презентации.
       `/.well-known/{caldav,carddav}`, autodiscover.xml
 - [x] BFF переключён с Radicale на SOGo (CALDAV_URL / CARDDAV_URL)
 - [x] Seed-скрипт работает через SOGo (tsdav discovery)
+- [x] User management API: `POST/DELETE /api/admin/users` с двухшаговым
+      провижионингом (Postgres + docker-mailserver, rollback на ошибке)
+- [x] Admin UI: создание/блокировка/удаление пользователей, смена ролей
+- [x] Audit log записывает все админ-действия
 - [x] docs/SOGO.md
-- [ ] User management API через UI *(next commit)*
 - [ ] LDAP-провизионер вместо docker socket *(Phase 3+)*
 - [ ] Password change endpoint через UI *(Phase 5)*
 
