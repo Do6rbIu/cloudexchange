@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { requireAdmin } from '../middleware/requireAuth.js';
 import { listUsers } from '../db/users.js';
 import { listAudit } from '../db/audit.js';
+import { checkMailStack } from '../services/mailStack.js';
 
 export async function adminRoutes(app: FastifyInstance) {
   app.get('/users', async (request, reply) => {
@@ -17,6 +18,11 @@ export async function adminRoutes(app: FastifyInstance) {
       createdAt: u.createdAt.toISOString(),
       lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
     }));
+  });
+
+  app.get('/mail-stack', async (request, reply) => {
+    await requireAdmin(request, reply);
+    return await checkMailStack();
   });
 
   app.get<{ Querystring: { action?: string; actor?: string; limit?: string } }>(

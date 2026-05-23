@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { AdminUser, AuditEntry } from '../types/api';
+import type { AdminUser, AuditEntry, MailStackStatus } from '../types/api';
 
 export const adminApi = {
   users: () => api.get<AdminUser[]>('/admin/users'),
@@ -11,4 +11,5 @@ export const adminApi = {
     const qs = p.toString();
     return api.get<AuditEntry[]>(`/admin/audit${qs ? `?${qs}` : ''}`);
   },
+  mailStack: () => api.get<MailStackStatus>('/admin/mail-stack'),
 };

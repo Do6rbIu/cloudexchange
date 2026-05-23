@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { MailboxSummary, MessageDetail, MessageSummary, SendPayload } from '../types/api';
+import type { MailboxSummary, MessageDetail, MessageSummary, SearchHit, SendPayload } from '../types/api';
 
 export const mailApi = {
   folders: () => api.get<MailboxSummary[]>('/mail/folders'),
@@ -22,4 +22,12 @@ export const mailApi = {
     ),
   send: (payload: SendPayload) =>
     api.post<{ ok: true; messageId: string }>('/mail/send', payload),
+  search: (q: string, opts?: { mailboxes?: string[]; limit?: number }) => {
+    const params = new URLSearchParams({ q });
+    if (opts?.mailboxes && opts.mailboxes.length > 0) {
+      params.set('mailboxes', opts.mailboxes.join(','));
+    }
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    return api.get<SearchHit[]>(`/mail/search?${params.toString()}`);
+  },
 };

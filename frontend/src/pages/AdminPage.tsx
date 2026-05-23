@@ -3,25 +3,31 @@ import { adminApi } from '../api/admin';
 import { ApiError } from '../api/client';
 import { useTheme } from '../store/theme';
 import type { Theme } from '../components/shared/theme';
-import type { AdminUser, AuditEntry } from '../types/api';
+import type { AdminUser, AuditEntry, MailStackStatus } from '../types/api';
 import { colorFor, initialsOf } from '../components/shared/format';
 
 export function AdminPage() {
   const { theme: t } = useTheme();
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [audit, setAudit] = useState<AuditEntry[] | null>(null);
+  const [mailStack, setMailStack] = useState<MailStackStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'users' | 'audit'>('users');
+  const [tab, setTab] = useState<'users' | 'audit' | 'stack'>('stack');
 
   useEffect(() => {
-    Promise.all([adminApi.users().catch((e) => e), adminApi.audit({ limit: 50 }).catch((e) => e)])
-      .then(([u, a]) => {
+    Promise.all([
+      adminApi.users().catch((e) => e),
+      adminApi.audit({ limit: 50 }).catch((e) => e),
+      adminApi.mailStack().catch((e) => e),
+    ])
+      .then(([u, a, m]) => {
         if (u instanceof Error) {
           setError(u instanceof ApiError && u.status === 403 ? 'Доступ только для администраторов' : u.message);
           return;
         }
         setUsers(u as AdminUser[]);
         if (!(a instanceof Error)) setAudit(a as AuditEntry[]);
+        if (!(m instanceof Error)) setMailStack(m as MailStackStatus);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Ошибка загрузки'));
   }, []);
@@ -44,14 +50,97 @@ export function AdminPage() {
       {!error && (
         <>
           <div style={{ display: 'flex', gap: 8, padding: '16px 32px 0' }}>
+            <Tab label="Mail-стек" active={tab === 'stack'} onClick={() => setTab('stack')} t={t} />
             <Tab label="Пользователи" active={tab === 'users'} onClick={() => setTab('users')} t={t} />
             <Tab label="Аудит-лог" active={tab === 'audit'} onClick={() => setTab('audit')} t={t} />
           </div>
 
+          {tab === 'stack' && <StackTab status={mailStack} t={t} />}
           {tab === 'users' && <UsersTab users={users} t={t} />}
           {tab === 'audit' && <AuditTab entries={audit} t={t} />}
         </>
       )}
+    </div>
+  );
+}
+
+function StackTab({ status, t }: { status: MailStackStatus | null; t: Theme }) {
+  if (!status) return <div style={{ padding: 32, color: t.textMuted }}>Загружаем…</div>;
+  const checks: Array<{ name: string; description: string; probe: typeof status.imap }> = [
+    { name: 'IMAP', description: 'Чтение почты через Dovecot', probe: status.imap },
+    { name: 'SMTP submission', description: 'Отправка через Postfix (port 587)', probe: status.smtp },
+    { name: 'ManageSieve', description: 'Серверные фильтры (port 4190)', probe: status.managesieve },
+    { name: 'Rspamd controller', description: 'Веб-консоль антиспама (port 11334)', probe: status.rspamdController },
+  ];
+  return (
+    <div style={{ padding: '0 32px 32px' }}>
+      <div
+        style={{
+          marginTop: 12,
+          marginBottom: 16,
+          fontSize: 13,
+          color: t.textMuted,
+          lineHeight: 1.5,
+          maxWidth: 720,
+        }}
+      >
+        Mail-стек в Phase 2 включает Postfix + Dovecot + Rspamd (антиспам) + ClamAV
+        (антивирус) + OpenDKIM (подпись) + OpenDMARC (проверка) + Fail2ban
+        (защита от брутфорса). Ниже — статус сетевых endpoint'ов.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+        {checks.map((c) => (
+          <div
+            key={c.name}
+            style={{
+              background: t.surface,
+              border: `1px solid ${t.border}`,
+              borderRadius: 10,
+              padding: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</div>
+              {c.probe.open ? (
+                <Pill text="up" bg="rgba(31,138,91,0.18)" color="#1F8A5B" />
+              ) : (
+                <Pill text="down" bg="rgba(192,57,43,0.18)" color={t.danger} />
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: t.textMuted }}>{c.description}</div>
+            <div style={{ fontSize: 11, color: t.textDim, fontFamily: 'JetBrains Mono, monospace' }}>
+              {c.probe.host}:{c.probe.port}{c.probe.responseMs !== null ? ` · ${c.probe.responseMs}ms` : ''}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div
+        style={{
+          marginTop: 20,
+          padding: 16,
+          background: t.surfaceAlt,
+          borderRadius: 10,
+          fontSize: 12,
+          color: t.textMuted,
+          lineHeight: 1.6,
+        }}
+      >
+        <strong style={{ color: t.text }}>DNS-записи для production-деплоя</strong>
+        <pre style={{ marginTop: 8, fontSize: 11, fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'pre-wrap' }}>
+{`example.com.        MX   10  mail.example.com.
+example.com.        TXT  "v=spf1 mx -all"
+_dmarc.example.com. TXT  "v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com"
+default._domainkey.example.com. TXT "(см. вывод bootstrap-demo.sh)"`}
+        </pre>
+        <div style={{ marginTop: 8 }}>
+          Публичный DKIM-ключ генерируется в скрипте <code>bootstrap-demo.sh</code> на этапе
+          инициализации домена. Опубликуйте его на DNS-провайдере перед запуском.
+        </div>
+      </div>
     </div>
   );
 }

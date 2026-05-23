@@ -6,6 +6,7 @@ import {
   getMessage,
   listMailboxes,
   listMessages,
+  searchMessages,
   setFlags,
 } from '../services/imap.js';
 import { sendMessage } from '../services/smtp.js';
@@ -18,6 +19,12 @@ const listMessagesQuery = z.object({
 const flagsBody = z.object({
   flags: z.array(z.string()).min(1),
   add: z.boolean().default(true),
+});
+
+const searchQuery = z.object({
+  q: z.string().min(1).max(200),
+  mailboxes: z.string().optional(), // comma-separated
+  limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
 const sendBody = z.object({
@@ -86,6 +93,22 @@ export async function mailRoutes(app: FastifyInstance) {
       return { ok: true };
     },
   );
+
+  app.get('/search', async (request, reply) => {
+    const user = await requireAuth(request, reply);
+    const parse = searchQuery.safeParse(request.query);
+    if (!parse.success) {
+      return reply.status(400).send({ error: 'BadRequest', message: parse.error.message });
+    }
+    const mailboxes = parse.data.mailboxes
+      ? parse.data.mailboxes.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    return await searchMessages(user, {
+      query: parse.data.q,
+      mailboxes,
+      limit: parse.data.limit,
+    });
+  });
 
   app.post('/send', async (request, reply) => {
     const user = await requireAuth(request, reply);

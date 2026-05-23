@@ -49,40 +49,79 @@ services:
       - cxnet
 
   # ────────────────────────────────────────────────────────────────────
-  # Mail backbone: Postfix (SMTP) + Dovecot (IMAP)
-  # In Phase 2 this gets Rspamd, ClamAV, OpenDKIM and SOGo bolted on.
+  # Mail backbone: Postfix + Dovecot, production-hardened.
+  #
+  # Rspamd (antispam / DKIM-DMARC-SPF / Bayes) replaces the SpamAssassin
+  # + Amavis pair. ClamAV scans every inbound message. OpenDKIM signs
+  # outbound mail. OpenDMARC verifies inbound alignment. Fail2ban bans
+  # brute-force attackers on IMAP/SMTP.
+  #
+  # First boot takes ~2 minutes while ClamAV downloads its signature
+  # database (~400 MB). Subsequent boots are fast.
   # ────────────────────────────────────────────────────────────────────
   mailserver:
     image: mailserver/docker-mailserver:14.0.0
-    hostname: mail.cloudexchange.local
+    hostname: ${MAIL_HOSTNAME:-mail.cloudexchange.local}
     container_name: cx-mail
     environment:
-      - ENABLE_SPAMASSASSIN=0
-      - ENABLE_CLAMAV=0
-      - ENABLE_FAIL2BAN=0
-      - ENABLE_OPENDKIM=0
-      - ENABLE_OPENDMARC=0
-      - ENABLE_POLICYD_SPF=0
-      - ENABLE_POSTGREY=0
+      # ── Antispam, antivirus, signing
+      - ENABLE_RSPAMD=1
+      - ENABLE_CLAMAV=1
+      - ENABLE_OPENDKIM=1
+      - ENABLE_OPENDMARC=1
+      - ENABLE_POLICYD_SPF=1
+      - ENABLE_FAIL2BAN=1
       - ENABLE_AMAVIS=0
-      - ENABLE_RSPAMD=0
+      - ENABLE_SPAMASSASSIN=0
+      - ENABLE_POSTGREY=0
+
+      # ── Rspamd behaviour
+      - RSPAMD_GREYLISTING=0
+      - RSPAMD_LEARN=1
+      - RSPAMD_HFILTER=1
+      - MOVE_SPAM_TO_JUNK=1
+      - MARK_SPAM_AS_READ=0
+      - SPAM_SUBJECT=[SPAM]_
+
+      # ── Dovecot extras
       - ENABLE_QUOTAS=1
+      - ENABLE_MANAGESIEVE=1
+      - DOVECOT_INET_PROTOCOLS=ipv4
+
+      # ── Postfix / network
       - PERMIT_DOCKER=connected-networks
       - SSL_TYPE=
       - POSTFIX_MESSAGE_SIZE_LIMIT=52428800
-      - OVERRIDE_HOSTNAME=mail.cloudexchange.local
+      - OVERRIDE_HOSTNAME=${MAIL_HOSTNAME:-mail.cloudexchange.local}
+      - POSTSCREEN_ACTION=enforce
+      - SPOOF_PROTECTION=0
       - LOG_LEVEL=info
+      - SUPERVISOR_LOGLEVEL=info
+      - TZ=UTC
+
+      # ── Account watcher: Dovecot picks up new mailbox accounts within
+      #    POSTFIX_INET_PROTOCOLS interval after they're added to
+      #    postfix-accounts.cf via `setup email add`.
+      - ACCOUNT_PROVISIONER=FILE
+    cap_add:
+      - NET_ADMIN
     volumes:
       - mail-data:/var/mail
       - mail-state:/var/mail-state
       - mail-logs:/var/log/mail
       - ./infra/mail/config:/tmp/docker-mailserver
     healthcheck:
-      test: ["CMD-SHELL", "ss -lntp | grep -q ':143' && ss -lntp | grep -q ':587'"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "ss -lnt | grep -q ':143 ' && ss -lnt | grep -q ':587 '"]
+      interval: 15s
+      timeout: 8s
       retries: 30
-      start_period: 60s
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+        reservations:
+          memory: 1500m
     restart: unless-stopped
     networks:
       - cxnet

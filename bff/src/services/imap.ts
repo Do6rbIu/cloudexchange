@@ -270,3 +270,93 @@ export async function deleteMessage(
     await client.logout();
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Search
+//
+// Server-side full-text search via IMAP SEARCH. When Dovecot's
+// fts-flatcurve plugin is loaded, the server transparently consults a
+// content index — so a BODY search across the whole INBOX completes in
+// milliseconds instead of streaming every message.
+// ────────────────────────────────────────────────────────────────────────
+
+export interface SearchHit extends MessageSummary {
+  mailbox: string;
+}
+
+interface SearchScope {
+  mailboxes?: string[];
+  query: string;
+  limit?: number;
+}
+
+export async function searchMessages(
+  user: SessionUser,
+  scope: SearchScope,
+): Promise<SearchHit[]> {
+  const limit = Math.min(Math.max(scope.limit ?? 50, 1), 200);
+  const query = scope.query.trim();
+  if (!query) return [];
+
+  const client = makeClient(user);
+  await client.connect();
+  try {
+    const targets = scope.mailboxes && scope.mailboxes.length > 0
+      ? scope.mailboxes
+      : (await client.list()).map((b) => b.path);
+
+    const out: SearchHit[] = [];
+    for (const path of targets) {
+      if (out.length >= limit) break;
+      const lock = await client.getMailboxLock(path);
+      try {
+        const uids = (await client.search(
+          {
+            or: [
+              { subject: query },
+              { from: query },
+              { to: query },
+              { body: query },
+            ],
+          },
+          { uid: true },
+        )) as number[];
+        if (!uids || uids.length === 0) continue;
+        const recent = uids.slice(-limit).reverse();
+        for await (const msg of client.fetch(
+          recent,
+          { envelope: true, flags: true, size: true, bodyStructure: true, uid: true },
+          { uid: true },
+        )) {
+          const env = msg.envelope;
+          const flags = msg.flags ?? new Set<string>();
+          const fromList = (env?.from ?? []).map((a) => ({
+            name: a.name ?? '',
+            address: a.address ?? '',
+          }));
+          out.push({
+            mailbox: path,
+            uid: msg.uid,
+            seq: msg.seq,
+            subject: env?.subject ?? '(без темы)',
+            from: firstAddress(fromList),
+            to: (env?.to ?? []).map((a) => ({ name: a.name ?? '', address: a.address ?? '' })),
+            date: (env?.date ?? new Date()).toISOString(),
+            preview: '',
+            unread: !flags.has('\\Seen'),
+            flagged: flags.has('\\Flagged'),
+            hasAttachment: hasAttachmentStructure(msg.bodyStructure),
+            size: msg.size ?? 0,
+          });
+          if (out.length >= limit) break;
+        }
+      } finally {
+        lock.release();
+      }
+    }
+    out.sort((a, b) => b.date.localeCompare(a.date));
+    return out.slice(0, limit);
+  } finally {
+    await client.logout();
+  }
+}
