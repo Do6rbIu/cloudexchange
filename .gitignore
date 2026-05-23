@@ -6,7 +6,8 @@ build/
 *.log
 .DS_Store
 
-# Mailserver / Radicale runtime state — created by docker compose
+# Old Phase 0 bind-mount dirs — kept for back-compat with anyone
+# upgrading from the previous compose file. New stack uses named volumes.
 infra/mail/data/
 infra/mail/state/
 infra/mail/logs/

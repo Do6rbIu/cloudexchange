@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-shot demo bootstrap:
-#   1. Start mailserver + radicale + bff + frontend
-#   2. Create demo mailbox + Radicale user
-#   3. Seed inbox, contacts and calendar with realistic Cloud24 data
+# One-shot demo bootstrap (Phase 1 architecture):
+#   1. Start postgres, redis, mailserver, radicale, bff, frontend, edge
+#   2. Wait for the mailserver to be healthy
+#   3. Provision the demo mailbox in docker-mailserver + Radicale htpasswd
+#   4. Run the seed container to populate inbox / sent / contacts / calendar
 #
-# Idempotent — safe to re-run; seed step skips already-populated stores.
+# Idempotent: re-runs reuse existing data.
 
 DEMO_EMAIL=${DEMO_EMAIL:-igor.petrov@cloudexchange.local}
 DEMO_PASSWORD=${DEMO_PASSWORD:-cloud24demo}
@@ -15,22 +16,34 @@ DEMO_DISPLAY_NAME=${DEMO_DISPLAY_NAME:-"Игорь Петров"}
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "▸ Building and starting containers"
-docker compose up -d --build mailserver radicale bff frontend
+if [[ ! -f .env ]]; then
+  echo "▸ .env not found — copying from .env.example"
+  cp .env.example .env
+fi
 
-echo "▸ Waiting for mailserver to be ready"
+echo "▸ Building and starting core stack"
+docker compose up -d --build postgres redis mailserver radicale bff frontend edge
+
+echo "▸ Waiting for mailserver to be healthy (this can take 30–60s on first boot)"
 for i in $(seq 1 60); do
-  if docker compose exec -T mailserver setup email list >/dev/null 2>&1; then
+  state=$(docker inspect -f '{{.State.Health.Status}}' cx-mail 2>/dev/null || echo starting)
+  if [[ "$state" == "healthy" ]]; then
+    echo "  mailserver: healthy"
     break
   fi
+  printf '  mailserver: %s (%s/60)\r' "$state" "$i"
   sleep 2
 done
+echo
 
 echo "▸ Provisioning demo mailbox $DEMO_EMAIL"
 if docker compose exec -T mailserver setup email list 2>/dev/null | grep -q "^\* ${DEMO_EMAIL}"; then
   echo "  (already exists, skipping)"
 else
   docker compose exec -T mailserver setup email add "$DEMO_EMAIL" "$DEMO_PASSWORD"
+  # Dovecot picks up new users on the fly via the postfix-accounts watcher,
+  # but giving it a beat avoids a race with the seeder's first IMAP bind.
+  sleep 3
 fi
 
 echo "▸ Adding $DEMO_EMAIL to Radicale (bcrypt)"
@@ -41,9 +54,10 @@ else
   HASH=$(docker run --rm tomsquest/docker-radicale:3.2.3.0 htpasswd -nbB "$DEMO_EMAIL" "$DEMO_PASSWORD" | tail -n1)
   echo "$HASH" >> "$USERS_FILE"
   docker compose restart radicale >/dev/null
+  sleep 2
 fi
 
-echo "▸ Seeding demo data"
+echo "▸ Seeding demo data (inbox via SMTP, contacts via CardDAV, events via CalDAV)"
 DEMO_EMAIL="$DEMO_EMAIL" \
 DEMO_PASSWORD="$DEMO_PASSWORD" \
 DEMO_DISPLAY_NAME="$DEMO_DISPLAY_NAME" \
@@ -53,7 +67,10 @@ echo
 echo "════════════════════════════════════════════════════════════════"
 echo "  ✓ Cloud24 Exchange demo ready"
 echo "════════════════════════════════════════════════════════════════"
-echo "  URL:      http://localhost:8080"
+echo "  Web URL:  http://localhost:8080"
 echo "  Email:    $DEMO_EMAIL"
 echo "  Password: $DEMO_PASSWORD"
+echo "  Role:     admin (admin panel visible)"
+echo ""
+echo "  Tip: on the login page click \"Войти как демо-пользователь\""
 echo "════════════════════════════════════════════════════════════════"

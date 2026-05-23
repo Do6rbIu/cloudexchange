@@ -9,6 +9,7 @@ import { ComposerPage } from './pages/ComposerPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { ContactsPage } from './pages/ContactsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AdminPage } from './pages/AdminPage';
 import { Icon } from './components/shared/Icon';
 
 function LoadingScreen() {
@@ -70,6 +71,7 @@ export function App() {
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="contacts" element={<ContactsPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="admin" element={<AdminPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/inbox" replace />} />
     </Routes>

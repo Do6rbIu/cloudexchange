@@ -7,11 +7,12 @@ import { Icon } from './shared/Icon';
 import { initialsOf, colorFor } from './shared/format';
 import type { MailboxSummary } from '../types/api';
 
-const NAV_ITEMS: Array<{ to: string; label: string; icon: string; matchPrefix?: string }> = [
+const NAV_ITEMS: Array<{ to: string; label: string; icon: string; matchPrefix?: string; adminOnly?: boolean }> = [
   { to: '/inbox', label: 'Входящие', icon: 'inbox', matchPrefix: '/inbox' },
   { to: '/compose', label: 'Написать', icon: 'send' },
   { to: '/calendar', label: 'Календарь', icon: 'calendar' },
   { to: '/contacts', label: 'Контакты', icon: 'contacts' },
+  { to: '/admin', label: 'Админка', icon: 'shield', adminOnly: true },
   { to: '/settings', label: 'Настройки', icon: 'settings' },
 ];
 
@@ -89,7 +90,7 @@ export function AppShell() {
           </div>
         </div>
 
-        {NAV_ITEMS.map((item) => (
+        {NAV_ITEMS.filter((item) => !item.adminOnly || user?.role === 'admin').map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

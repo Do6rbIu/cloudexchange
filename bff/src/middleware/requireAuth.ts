@@ -12,3 +12,15 @@ export async function requireAuth(
   }
   return user;
 }
+
+export async function requireAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<SessionUser> {
+  const user = await requireAuth(request, reply);
+  if (user.role !== 'admin') {
+    reply.status(403).send({ error: 'Forbidden', message: 'Admin role required' });
+    throw new Error('forbidden');
+  }
+  return user;
+}

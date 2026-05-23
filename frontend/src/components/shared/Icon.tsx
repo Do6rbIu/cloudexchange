@@ -28,6 +28,7 @@ const PATHS: Record<string, string> = {
   chevronRight: 'M9 6l6 6-6 6',
   user: 'M12 4a4 4 0 1 1-4 4 4 4 0 0 1 4-4Zm0 10c4 0 8 2 8 5v1H4v-1c0-3 4-5 8-5Z',
   flag: 'M5 3v18M5 5h12l-2 4 2 4H5',
+  shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Zm-3 9l2 2 4-4',
 };
 
 export function Icon({ name, size = 18, color = 'currentColor' }: IconProps) {
