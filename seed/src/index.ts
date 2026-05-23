@@ -3,8 +3,8 @@ import net from 'node:net';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import ICAL from 'ical.js';
+import { createDAVClient, type DAVCalendar, type DAVCollection } from 'tsdav';
 import { CONTACTS, DEMO_USER, EVENTS, MESSAGES, SENT_MESSAGES } from './data.js';
-import { ensureAddressBook, ensureCalendar, putResource } from './dav.js';
 
 const cfg = {
   imapHost: process.env.IMAP_HOST ?? 'localhost',
@@ -13,8 +13,8 @@ const cfg = {
   smtpHost: process.env.SMTP_HOST ?? process.env.IMAP_HOST ?? 'localhost',
   smtpPort: Number(process.env.SMTP_PORT ?? 587),
   smtpSecure: (process.env.SMTP_SECURE ?? 'false') === 'true',
-  caldavUrl: process.env.CALDAV_URL ?? 'http://localhost:5232',
-  carddavUrl: process.env.CARDDAV_URL ?? 'http://localhost:5232',
+  caldavUrl: process.env.CALDAV_URL ?? 'http://localhost:20000/SOGo/dav/',
+  carddavUrl: process.env.CARDDAV_URL ?? 'http://localhost:20000/SOGo/dav/',
   email: process.env.DEMO_EMAIL ?? DEMO_USER.email,
   password: process.env.DEMO_PASSWORD ?? DEMO_USER.password,
   displayName: process.env.DEMO_DISPLAY_NAME ?? DEMO_USER.displayName,
@@ -33,18 +33,9 @@ async function waitForPort(host: string, port: number, label: string): Promise<v
       const sock = new net.Socket();
       sock.setTimeout(2000);
       sock
-        .once('connect', () => {
-          sock.destroy();
-          resolve(true);
-        })
-        .once('timeout', () => {
-          sock.destroy();
-          resolve(false);
-        })
-        .once('error', () => {
-          sock.destroy();
-          resolve(false);
-        })
+        .once('connect', () => { sock.destroy(); resolve(true); })
+        .once('timeout', () => { sock.destroy(); resolve(false); })
+        .once('error', () => { sock.destroy(); resolve(false); })
         .connect(port, host);
     });
     if (ok) {
@@ -69,19 +60,11 @@ function dateAt(dayOffset: number, hour: number, minute: number): Date {
 }
 
 async function seedInboxViaSmtp(): Promise<void> {
-  // Send each demo message *to* the demo user from each sender. This
-  // exercises the real SMTP delivery path (MTA → LMTP → Maildir), so the
-  // mailserver, antispam and quotas all run against the seed data — much
-  // closer to a production smoke-test than an IMAP APPEND.
   for (const m of MESSAGES) {
     const transport = nodemailer.createTransport({
       host: cfg.smtpHost,
       port: cfg.smtpPort,
       secure: cfg.smtpSecure,
-      // For docker-mailserver we don't authenticate as the foreign
-      // sender (we don't have their password). Instead we connect as
-      // the demo user — Postfix accepts authenticated submissions and
-      // applies SMTP filters but lets us spoof the From: header in dev.
       auth: { user: cfg.email, pass: cfg.password },
       tls: { rejectUnauthorized: false },
     });
@@ -107,8 +90,6 @@ async function seedInboxViaSmtp(): Promise<void> {
 }
 
 async function appendSent(): Promise<void> {
-  // Sent items don't pass through the MTA — append them directly to the
-  // user's Sent folder via IMAP.
   const client = new ImapFlow({
     host: cfg.imapHost,
     port: cfg.imapPort,
@@ -119,11 +100,7 @@ async function appendSent(): Promise<void> {
   });
   await client.connect();
   try {
-    try {
-      await client.mailboxCreate('Sent');
-    } catch {
-      // Already exists.
-    }
+    try { await client.mailboxCreate('Sent'); } catch { /* already exists */ }
     for (const m of SENT_MESSAGES) {
       const date = dateAt(m.dayOffset, m.hour, m.minute);
       const headers = [
@@ -165,7 +142,8 @@ async function isInboxAlreadySeeded(): Promise<boolean> {
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// Contacts (CardDAV)
+// DAV — SOGo creates a default `personal` calendar + address book on
+// first connect, so tsdav discovery just works (no MKCOL needed).
 // ────────────────────────────────────────────────────────────────────────
 
 function buildVCard(c: (typeof CONTACTS)[number], uid: string): string {
@@ -181,23 +159,41 @@ function buildVCard(c: (typeof CONTACTS)[number], uid: string): string {
 }
 
 async function seedContacts(): Promise<void> {
-  const davCfg = { baseUrl: cfg.carddavUrl, email: cfg.email, password: cfg.password };
-  const bookUrl = await ensureAddressBook(davCfg, 'Корпоративная книга');
+  const client = await createDAVClient({
+    serverUrl: cfg.carddavUrl,
+    credentials: { username: cfg.email, password: cfg.password },
+    authMethod: 'Basic',
+    defaultAccountType: 'carddav',
+  });
+  const books = await client.fetchAddressBooks();
+  if (books.length === 0) {
+    throw new Error('no address books returned by CardDAV — is SOGo healthy?');
+  }
+  const book = books[0]!;
+  log('contacts', `using address book ${book.url}`);
+
+  // Skip if already populated (idempotent re-run).
+  const existing = await client.fetchVCards({ addressBook: book }).catch(() => []);
+  if (existing.length >= CONTACTS.length) {
+    log('contacts', `already has ${existing.length} cards — skipping`);
+    return;
+  }
+
   for (const c of CONTACTS) {
     const uid = `contact-${c.email.replace(/[^a-zA-Z0-9]/g, '-')}`;
-    const url = `${bookUrl}${uid}.vcf`;
+    const vcf = buildVCard(c, uid);
     try {
-      await putResource(url, buildVCard(c, uid), 'text/vcard; charset=utf-8', davCfg);
+      await client.createVCard({
+        addressBook: book,
+        filename: `${uid}.vcf`,
+        vCardString: vcf,
+      });
     } catch (err) {
       log('contacts', `skip ${c.fullName}: ${(err as Error).message}`);
     }
   }
-  log('contacts', `seeded ${CONTACTS.length} contacts at ${bookUrl}`);
+  log('contacts', `seeded ${CONTACTS.length} contacts`);
 }
-
-// ────────────────────────────────────────────────────────────────────────
-// Calendar (CalDAV)
-// ────────────────────────────────────────────────────────────────────────
 
 function startOfWeek(d: Date): Date {
   const day = (d.getDay() + 6) % 7;
@@ -240,21 +236,41 @@ function buildIcs(uid: string, e: (typeof EVENTS)[number], weekStart: Date, orga
 }
 
 async function seedCalendar(): Promise<void> {
-  const davCfg = { baseUrl: cfg.caldavUrl, email: cfg.email, password: cfg.password };
-  const calUrl = await ensureCalendar(davCfg, 'Рабочий календарь');
+  const client = await createDAVClient({
+    serverUrl: cfg.caldavUrl,
+    credentials: { username: cfg.email, password: cfg.password },
+    authMethod: 'Basic',
+    defaultAccountType: 'caldav',
+  });
+  const calendars = (await client.fetchCalendars()) as DAVCalendar[] & DAVCollection[];
+  if (calendars.length === 0) {
+    throw new Error('no calendars returned by CalDAV — is SOGo healthy?');
+  }
+  const calendar = calendars[0]!;
+  log('calendar', `using calendar ${calendar.url}`);
+
+  const existing = await client.fetchCalendarObjects({ calendar }).catch(() => []);
+  if (existing.length >= EVENTS.length) {
+    log('calendar', `already has ${existing.length} events — skipping`);
+    return;
+  }
+
   const weekStart = startOfWeek(new Date());
   for (let i = 0; i < EVENTS.length; i++) {
     const ev = EVENTS[i];
     const uid = `seed-event-${i}-${weekStart.toISOString().slice(0, 10)}`;
     const ics = buildIcs(uid, ev, weekStart, cfg.email);
-    const url = `${calUrl}${uid}.ics`;
     try {
-      await putResource(url, ics, 'text/calendar; charset=utf-8', davCfg);
+      await client.createCalendarObject({
+        calendar,
+        filename: `${uid}.ics`,
+        iCalString: ics,
+      });
     } catch (err) {
       log('calendar', `skip ${ev.title}: ${(err as Error).message}`);
     }
   }
-  log('calendar', `seeded ${EVENTS.length} events at ${calUrl}`);
+  log('calendar', `seeded ${EVENTS.length} events`);
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -264,14 +280,14 @@ async function seedCalendar(): Promise<void> {
 async function main(): Promise<void> {
   log('main', `target user: ${cfg.email}`);
   log('main', `IMAP: ${cfg.imapHost}:${cfg.imapPort}  SMTP: ${cfg.smtpHost}:${cfg.smtpPort}`);
-  log('main', `DAV:  ${cfg.caldavUrl}`);
+  log('main', `CalDAV: ${cfg.caldavUrl}`);
+  log('main', `CardDAV: ${cfg.carddavUrl}`);
 
   await waitForPort(cfg.imapHost, cfg.imapPort, 'main');
   await waitForPort(cfg.smtpHost, cfg.smtpPort, 'main');
-  await waitForPort(new URL(cfg.caldavUrl).hostname, Number(new URL(cfg.caldavUrl).port || 80), 'main');
+  const davUrl = new URL(cfg.caldavUrl);
+  await waitForPort(davUrl.hostname, Number(davUrl.port || 80), 'main');
 
-  // The mail step is the slowest because Postfix can take a few seconds
-  // after the port opens before it accepts SMTP AUTH.
   if (await isInboxAlreadySeeded()) {
     log('mail', 'INBOX already populated, skipping mail seed');
   } else {

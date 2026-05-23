@@ -70,3 +70,45 @@ export async function listUsers(): Promise<UserRow[]> {
   );
   return res.rows.map(fromRow);
 }
+
+export interface CreateUserInput {
+  email: string;
+  displayName: string;
+  role?: 'user' | 'admin';
+  quotaBytes?: number;
+}
+
+export async function createUser(input: CreateUserInput): Promise<UserRow> {
+  const res = await db().query<UserRowRaw>(
+    `INSERT INTO users (email, display_name, role, quota_bytes)
+        VALUES ($1, $2, COALESCE($3, 'user'), COALESCE($4, 5368709120))
+     RETURNING id, email, display_name, role, quota_bytes, is_active, created_at, last_login_at`,
+    [input.email, input.displayName, input.role ?? null, input.quotaBytes ?? null],
+  );
+  return fromRow(res.rows[0]);
+}
+
+export async function setUserActive(email: string, active: boolean): Promise<UserRow | null> {
+  const res = await db().query<UserRowRaw>(
+    `UPDATE users SET is_active = $2, updated_at = now()
+       WHERE email = $1
+     RETURNING id, email, display_name, role, quota_bytes, is_active, created_at, last_login_at`,
+    [email, active],
+  );
+  return res.rows[0] ? fromRow(res.rows[0]) : null;
+}
+
+export async function setUserRole(email: string, role: 'user' | 'admin'): Promise<UserRow | null> {
+  const res = await db().query<UserRowRaw>(
+    `UPDATE users SET role = $2, updated_at = now()
+       WHERE email = $1
+     RETURNING id, email, display_name, role, quota_bytes, is_active, created_at, last_login_at`,
+    [email, role],
+  );
+  return res.rows[0] ? fromRow(res.rows[0]) : null;
+}
+
+export async function deleteUser(email: string): Promise<boolean> {
+  const res = await db().query(`DELETE FROM users WHERE email = $1`, [email]);
+  return (res.rowCount ?? 0) > 0;
+}

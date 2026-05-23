@@ -92,21 +92,46 @@ end-to-end и было пригодно для презентации.
       `docker-compose.dev.yml` (dev overrides)
 
 ### Phase 2 · Production mail stack
-**Status: next · risk: medium**
+**Status: in progress · risk: medium**
 
 Замена dev-mailserver на полноценный mail-стек с антиспамом, антивирусом
 и DKIM-подписью исходящей почты.
 
-- [ ] Rspamd для проверки входящей почты (репутация, Bayes, DKIM/SPF/DMARC)
-- [ ] ClamAV для антивирусной проверки вложений
-- [ ] OpenDKIM подписывает исходящую почту корпоративным ключом
-- [ ] OpenDMARC проверяет alignment входящих
-- [ ] Postfix настроен на TLS-only outbound + DANE
-- [ ] Dovecot: sieve filtering (правила фильтрации в почтовом ящике),
-      quotas (лимиты места), FTS-flatcurve (быстрый поиск по содержимому)
-- [ ] SOGo вместо Radicale: CalDAV+CardDAV+ActiveSync, web admin
-- [ ] Postfix/Dovecot читают пользователей из PostgreSQL
-      (virtual-mailbox-maps + sql-passwd lookup)
+- [x] Rspamd для проверки входящей почты (репутация, Bayes, DKIM/SPF/DMARC)
+- [x] ClamAV для антивирусной проверки вложений
+- [x] OpenDKIM подписывает исходящую почту корпоративным ключом
+- [x] OpenDMARC проверяет alignment входящих
+- [x] policyd-spf для SPF-проверки на уровне Postfix
+- [x] Fail2ban: блок IP-адресов после неудачных IMAP/SMTP логинов
+- [x] Quotas: лимит места на ящик (5 GiB по умолчанию)
+- [x] ManageSieve: серверные фильтры (правила в почтовом ящике)
+- [x] Server-side full-text search в IMAP (BFF → IMAP SEARCH BODY)
+- [x] Admin UI: статус mail-стека и DNS-инструкции
+- [x] Документация: docs/MAIL-STACK.md
+- [ ] Postfix настроен на TLS-only outbound + DANE *(Phase 3)*
+- [ ] FTS-flatcurve полнотекстовый индекс для быстрого поиска *(Phase 4)*
+
+### Phase 2.5 · SOGo + Postgres-backed user management
+**Status: this commit · risk: medium**
+
+Замена Radicale на SOGo (полноценный групповой календарь + ActiveSync)
+и единый источник правды по пользователям через PostgreSQL.
+
+- [x] SOGo контейнер (build из официального APT-репо Inverse Inc.)
+- [x] Memcached как session-backend SOGo
+- [x] PostgreSQL `sogo` БД с ролью, FDW-view на `cloudexchange.users`
+- [x] SOGo конфиг: IMAP-аутентификация, SQL-источник пользователей
+- [x] nginx-edge проксирует `/SOGo`, `/Microsoft-Server-ActiveSync`,
+      `/.well-known/{caldav,carddav}`, autodiscover.xml
+- [x] BFF переключён с Radicale на SOGo (CALDAV_URL / CARDDAV_URL)
+- [x] Seed-скрипт работает через SOGo (tsdav discovery)
+- [x] User management API: `POST/DELETE /api/admin/users` с двухшаговым
+      провижионингом (Postgres + docker-mailserver, rollback на ошибке)
+- [x] Admin UI: создание/блокировка/удаление пользователей, смена ролей
+- [x] Audit log записывает все админ-действия
+- [x] docs/SOGO.md
+- [ ] LDAP-провизионер вместо docker socket *(Phase 3+)*
+- [ ] Password change endpoint через UI *(Phase 5)*
 
 ### Phase 3 · TLS, identity, security
 **Status: planned · risk: medium**

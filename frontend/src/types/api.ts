@@ -15,6 +15,24 @@ export interface AdminUser {
   lastLoginAt: string | null;
 }
 
+export interface SearchHit extends MessageSummary {
+  mailbox: string;
+}
+
+export interface PortProbe {
+  host: string;
+  port: number;
+  open: boolean;
+  responseMs: number | null;
+}
+
+export interface MailStackStatus {
+  imap: PortProbe;
+  smtp: PortProbe;
+  managesieve: PortProbe;
+  rspamdController: PortProbe;
+}
+
 export interface AuditEntry {
   id: string;
   occurredAt: string;

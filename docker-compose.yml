@@ -49,59 +49,134 @@ services:
       - cxnet
 
   # ────────────────────────────────────────────────────────────────────
-  # Mail backbone: Postfix (SMTP) + Dovecot (IMAP)
-  # In Phase 2 this gets Rspamd, ClamAV, OpenDKIM and SOGo bolted on.
+  # Mail backbone: Postfix + Dovecot, production-hardened.
+  #
+  # Rspamd (antispam / DKIM-DMARC-SPF / Bayes) replaces the SpamAssassin
+  # + Amavis pair. ClamAV scans every inbound message. OpenDKIM signs
+  # outbound mail. OpenDMARC verifies inbound alignment. Fail2ban bans
+  # brute-force attackers on IMAP/SMTP.
+  #
+  # First boot takes ~2 minutes while ClamAV downloads its signature
+  # database (~400 MB). Subsequent boots are fast.
   # ────────────────────────────────────────────────────────────────────
   mailserver:
     image: mailserver/docker-mailserver:14.0.0
-    hostname: mail.cloudexchange.local
+    hostname: ${MAIL_HOSTNAME:-mail.cloudexchange.local}
     container_name: cx-mail
     environment:
-      - ENABLE_SPAMASSASSIN=0
-      - ENABLE_CLAMAV=0
-      - ENABLE_FAIL2BAN=0
-      - ENABLE_OPENDKIM=0
-      - ENABLE_OPENDMARC=0
-      - ENABLE_POLICYD_SPF=0
-      - ENABLE_POSTGREY=0
+      # ── Antispam, antivirus, signing
+      - ENABLE_RSPAMD=1
+      - ENABLE_CLAMAV=1
+      - ENABLE_OPENDKIM=1
+      - ENABLE_OPENDMARC=1
+      - ENABLE_POLICYD_SPF=1
+      - ENABLE_FAIL2BAN=1
       - ENABLE_AMAVIS=0
-      - ENABLE_RSPAMD=0
+      - ENABLE_SPAMASSASSIN=0
+      - ENABLE_POSTGREY=0
+
+      # ── Rspamd behaviour
+      - RSPAMD_GREYLISTING=0
+      - RSPAMD_LEARN=1
+      - RSPAMD_HFILTER=1
+      - MOVE_SPAM_TO_JUNK=1
+      - MARK_SPAM_AS_READ=0
+      - SPAM_SUBJECT=[SPAM]_
+
+      # ── Dovecot extras
       - ENABLE_QUOTAS=1
+      - ENABLE_MANAGESIEVE=1
+      - DOVECOT_INET_PROTOCOLS=ipv4
+
+      # ── Postfix / network
       - PERMIT_DOCKER=connected-networks
       - SSL_TYPE=
       - POSTFIX_MESSAGE_SIZE_LIMIT=52428800
-      - OVERRIDE_HOSTNAME=mail.cloudexchange.local
+      - OVERRIDE_HOSTNAME=${MAIL_HOSTNAME:-mail.cloudexchange.local}
+      - POSTSCREEN_ACTION=enforce
+      - SPOOF_PROTECTION=0
       - LOG_LEVEL=info
+      - SUPERVISOR_LOGLEVEL=info
+      - TZ=UTC
+
+      # ── Account watcher: Dovecot picks up new mailbox accounts within
+      #    POSTFIX_INET_PROTOCOLS interval after they're added to
+      #    postfix-accounts.cf via `setup email add`.
+      - ACCOUNT_PROVISIONER=FILE
+    cap_add:
+      - NET_ADMIN
     volumes:
       - mail-data:/var/mail
       - mail-state:/var/mail-state
       - mail-logs:/var/log/mail
       - ./infra/mail/config:/tmp/docker-mailserver
     healthcheck:
-      test: ["CMD-SHELL", "ss -lntp | grep -q ':143' && ss -lntp | grep -q ':587'"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "ss -lnt | grep -q ':143 ' && ss -lnt | grep -q ':587 '"]
+      interval: 15s
+      timeout: 8s
       retries: 30
-      start_period: 60s
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+        reservations:
+          memory: 1500m
     restart: unless-stopped
     networks:
       - cxnet
 
   # ────────────────────────────────────────────────────────────────────
-  # Calendar + contacts: Radicale (CalDAV + CardDAV)
-  # Will be replaced by SOGo in Phase 2 for ActiveSync + scheduling.
+  # Memcached — session/cache backend for SOGo
   # ────────────────────────────────────────────────────────────────────
-  radicale:
-    image: tomsquest/docker-radicale:3.2.3.0
-    container_name: cx-radicale
+  memcached:
+    image: memcached:1.6-alpine
+    container_name: cx-memcached
+    command: ["-m", "256", "-c", "1024"]
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
+  # SOGo — CalDAV, CardDAV, and Microsoft ActiveSync.
+  #
+  # Replaces Radicale from Phase 1. SOGo gives us:
+  #   - Group calendaring with free/busy + scheduling (RFC 6638)
+  #   - CardDAV address books
+  #   - Microsoft ActiveSync (Outlook / iOS / Android Mail "Exchange")
+  #   - Web UI at /SOGo for direct access without our front-end
+  #
+  # Authenticates users against IMAP (Dovecot) — passwords never live in
+  # SOGo's database. The cloudexchange.users table is exposed to SOGo via
+  # a foreign-data-wrapper VIEW so there's one source of truth.
+  # ────────────────────────────────────────────────────────────────────
+  sogo:
+    build:
+      context: ./infra/sogo
+      dockerfile: Dockerfile
+    container_name: cx-sogo
+    environment:
+      - SOGO_PG_HOST=postgres
+      - SOGO_PG_PORT=5432
+      - SOGO_PG_USER=sogo
+      - SOGO_PG_PASSWORD=sogo
+      - SOGO_PG_DB=sogo
     volumes:
-      - radicale-data:/data
-      - ./infra/radicale/config:/config:ro
+      - sogo-spool:/var/spool/sogo
+      - sogo-logs:/var/log/sogo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+      mailserver:
+        condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:5232/ -t 1 -T 2 || exit 0"]
-      interval: 10s
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 20000"]
+      interval: 15s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 60s
     restart: unless-stopped
     networks:
       - cxnet
@@ -127,10 +202,17 @@ services:
       - SMTP_HOST=mailserver
       - SMTP_PORT=587
       - SMTP_SECURE=false
-      - CALDAV_URL=http://radicale:5232
-      - CARDDAV_URL=http://radicale:5232
+      - CALDAV_URL=http://sogo:20000/SOGo/dav/
+      - CARDDAV_URL=http://sogo:20000/SOGo/dav/
       - CORS_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:8080}
       - TRUST_PROXY=true
+      - MAIL_CONTAINER_NAME=cx-mail
+    # The Docker socket is mounted read/write so the admin user-provisioning
+    # path can `setup email add` inside the mailserver container. This is
+    # the deliberate compromise of Phase 2.5; Phase 3 swaps it for an LDAP
+    # provisioner.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
@@ -138,7 +220,7 @@ services:
         condition: service_healthy
       mailserver:
         condition: service_started
-      radicale:
+      sogo:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -200,15 +282,15 @@ services:
       - SMTP_HOST=mailserver
       - SMTP_PORT=587
       - SMTP_SECURE=false
-      - CALDAV_URL=http://radicale:5232
-      - CARDDAV_URL=http://radicale:5232
+      - CALDAV_URL=http://sogo:20000/SOGo/dav/
+      - CARDDAV_URL=http://sogo:20000/SOGo/dav/
       - DEMO_EMAIL=${DEMO_EMAIL:-igor.petrov@cloudexchange.local}
       - DEMO_PASSWORD=${DEMO_PASSWORD:-cloud24demo}
       - DEMO_DISPLAY_NAME=${DEMO_DISPLAY_NAME:-Игорь Петров}
     depends_on:
       mailserver:
         condition: service_healthy
-      radicale:
+      sogo:
         condition: service_started
     restart: "no"
     networks:
@@ -220,7 +302,8 @@ volumes:
   mail-data:
   mail-state:
   mail-logs:
-  radicale-data:
+  sogo-spool:
+  sogo-logs:
 
 networks:
   cxnet:

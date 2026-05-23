@@ -31,6 +31,9 @@ export function InboxPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [searchScope, setSearchScope] = useState<'folder' | 'all'>('folder');
+  const [serverHits, setServerHits] = useState<MessageSummary[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const selectedUid = params.uid ? Number(params.uid) : null;
 
@@ -92,7 +95,30 @@ export function InboxPage() {
     };
   }, [selectedUid, mailbox, refreshFolders]);
 
-  const filtered = useMemo(() => {
+  // Debounced server-side search when scope === 'all'. When the user is
+  // looking inside the current folder, we keep the cheap client-side
+  // substring filter so typing feels instant.
+  useEffect(() => {
+    if (searchScope !== 'all' || !query) {
+      setServerHits(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = window.setTimeout(() => {
+      mailApi
+        .search(query, { limit: 100 })
+        .then((hits) => setServerHits(hits))
+        .catch((err) => setError(err instanceof Error ? err.message : 'Ошибка поиска'))
+        .finally(() => setSearching(false));
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [query, searchScope]);
+
+  const filtered: MessageSummary[] = useMemo(() => {
+    if (searchScope === 'all' && query) {
+      return serverHits ?? [];
+    }
     if (!query) return messages;
     const q = query.toLowerCase();
     return messages.filter((m) =>
@@ -101,7 +127,7 @@ export function InboxPage() {
         .toLowerCase()
         .includes(q),
     );
-  }, [messages, query]);
+  }, [messages, query, searchScope, serverHits]);
 
   function openFolder(path: string) {
     setSearchParams({ mailbox: path });
@@ -253,22 +279,46 @@ export function InboxPage() {
               ↻
             </button>
           </div>
-          <input
-            type="search"
-            placeholder="Поиск по теме, отправителю, превью…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{
-              padding: '7px 10px',
-              fontSize: 12,
-              fontFamily: 'inherit',
-              background: t.bg,
-              border: `1px solid ${t.border}`,
-              borderRadius: 6,
-              color: t.text,
-              outline: 'none',
-            }}
-          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="search"
+              placeholder={searchScope === 'all' ? 'Поиск по всем папкам…' : 'Поиск в этой папке…'}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{
+                flex: 1,
+                padding: '7px 10px',
+                fontSize: 12,
+                fontFamily: 'inherit',
+                background: t.bg,
+                border: `1px solid ${t.border}`,
+                borderRadius: 6,
+                color: t.text,
+                outline: 'none',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setSearchScope((s) => (s === 'folder' ? 'all' : 'folder'))}
+              title={searchScope === 'folder' ? 'Расширить поиск на все папки' : 'Искать только в текущей папке'}
+              style={{
+                padding: '6px 10px',
+                fontSize: 11,
+                background: searchScope === 'all' ? t.accent : t.surface,
+                color: searchScope === 'all' ? '#FFF' : t.textMuted,
+                border: `1px solid ${searchScope === 'all' ? t.accent : t.border}`,
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                flexShrink: 0,
+              }}
+            >
+              {searchScope === 'all' ? 'Все папки' : 'В папке'}
+            </button>
+          </div>
+          {searching && (
+            <div style={{ fontSize: 11, color: t.textMuted }}>Поиск по всем папкам…</div>
+          )}
         </header>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
