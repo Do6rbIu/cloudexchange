@@ -110,8 +110,25 @@ end-to-end и было пригодно для презентации.
 - [x] Документация: docs/MAIL-STACK.md
 - [ ] Postfix настроен на TLS-only outbound + DANE *(Phase 3)*
 - [ ] FTS-flatcurve полнотекстовый индекс для быстрого поиска *(Phase 4)*
-- [ ] SOGo вместо Radicale: CalDAV+CardDAV+ActiveSync, web admin *(Phase 2.5)*
-- [ ] Postfix/Dovecot читают пользователей из PostgreSQL *(Phase 2.5)*
+
+### Phase 2.5 · SOGo + Postgres-backed user management
+**Status: this commit · risk: medium**
+
+Замена Radicale на SOGo (полноценный групповой календарь + ActiveSync)
+и единый источник правды по пользователям через PostgreSQL.
+
+- [x] SOGo контейнер (build из официального APT-репо Inverse Inc.)
+- [x] Memcached как session-backend SOGo
+- [x] PostgreSQL `sogo` БД с ролью, FDW-view на `cloudexchange.users`
+- [x] SOGo конфиг: IMAP-аутентификация, SQL-источник пользователей
+- [x] nginx-edge проксирует `/SOGo`, `/Microsoft-Server-ActiveSync`,
+      `/.well-known/{caldav,carddav}`, autodiscover.xml
+- [x] BFF переключён с Radicale на SOGo (CALDAV_URL / CARDDAV_URL)
+- [x] Seed-скрипт работает через SOGo (tsdav discovery)
+- [x] docs/SOGO.md
+- [ ] User management API через UI *(next commit)*
+- [ ] LDAP-провизионер вместо docker socket *(Phase 3+)*
+- [ ] Password change endpoint через UI *(Phase 5)*
 
 ### Phase 3 · TLS, identity, security
 **Status: planned · risk: medium**

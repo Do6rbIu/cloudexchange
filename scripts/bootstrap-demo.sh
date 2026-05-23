@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-shot demo bootstrap (Phase 2 architecture):
-#   1. Start postgres, redis, mailserver, radicale, bff, frontend, edge
-#   2. Wait for the mailserver to be healthy (this takes ~2 min on first
-#      boot while ClamAV downloads its signature database)
-#   3. Provision the demo mailbox + Radicale htpasswd entry
-#   4. Generate OpenDKIM signing keys for the local domain
-#   5. Apply a mailbox quota
-#   6. Run the seed container to populate inbox / sent / contacts / calendar
+# One-shot demo bootstrap (Phase 2.5 architecture):
+#   1. Start postgres + redis (needed by sogo init scripts)
+#   2. Start mailserver, memcached, sogo, bff, frontend, edge
+#   3. Wait for mailserver to be healthy
+#   4. Provision the demo mailbox via setup email add
+#   5. Generate OpenDKIM signing keys for the local domain
+#   6. Apply a mailbox quota
+#   7. Wait for SOGo to be reachable (it creates personal calendar +
+#      address book on first IMAP-validated login)
+#   8. Run the seed container to populate inbox / sent / contacts / events
 #
 # Idempotent: re-runs reuse existing state.
 
@@ -28,7 +30,7 @@ if [[ ! -f .env ]]; then
 fi
 
 echo "▸ Building and starting core stack"
-docker compose up -d --build postgres redis mailserver radicale bff frontend edge
+docker compose up -d --build postgres redis memcached mailserver sogo bff frontend edge
 
 echo "▸ Waiting for mailserver to be healthy"
 echo "  First boot can take 2-3 minutes (ClamAV downloads ~400 MB of signatures)"
@@ -67,7 +69,6 @@ else
   docker compose exec -T mailserver setup config dkim domain "$DEMO_DOMAIN" 2>&1 \
     | sed 's/^/  /' || \
     docker compose exec -T mailserver setup config dkim 2>&1 | sed 's/^/  /'
-  # Reload Postfix/OpenDKIM so the new keys take effect.
   docker compose exec -T mailserver postfix reload >/dev/null 2>&1 || true
   docker compose exec -T mailserver supervisorctl restart opendkim >/dev/null 2>&1 || true
 fi
@@ -78,18 +79,23 @@ if docker compose exec -T mailserver test -f "$DKIM_PUB_FILE" 2>/dev/null; then
   DKIM_RECORD=$(docker compose exec -T mailserver cat "$DKIM_PUB_FILE" 2>/dev/null | tr -d '\r')
 fi
 
-echo "▸ Adding $DEMO_EMAIL to Radicale (bcrypt)"
-USERS_FILE="$ROOT_DIR/infra/radicale/config/users"
-if grep -q "^${DEMO_EMAIL}:" "$USERS_FILE" 2>/dev/null; then
-  echo "  (already in htpasswd, skipping)"
-else
-  HASH=$(docker run --rm tomsquest/docker-radicale:3.2.3.0 htpasswd -nbB "$DEMO_EMAIL" "$DEMO_PASSWORD" | tail -n1)
-  echo "$HASH" >> "$USERS_FILE"
-  docker compose restart radicale >/dev/null
-  sleep 2
-fi
+echo "▸ Ensuring app-level user record exists for $DEMO_EMAIL"
+# The init SQL already inserts this user. If you re-run with a different
+# demo email, this UPSERT picks up the change.
+docker compose exec -T postgres psql -U cloudexchange -d cloudexchange -c \
+  "INSERT INTO users (email, display_name, role) VALUES ('$DEMO_EMAIL', '$DEMO_DISPLAY_NAME', 'admin') ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, role = 'admin';" \
+  >/dev/null 2>&1 || true
 
-echo "▸ Seeding demo data (inbox via SMTP, contacts via CardDAV, events via CalDAV)"
+echo "▸ Waiting for SOGo to be reachable"
+for i in $(seq 1 60); do
+  if docker compose exec -T sogo nc -z 127.0.0.1 20000 2>/dev/null; then
+    echo "  sogo: ready"
+    break
+  fi
+  sleep 2
+done
+
+echo "▸ Seeding demo data (inbox via SMTP, contacts + events via SOGo DAV)"
 DEMO_EMAIL="$DEMO_EMAIL" \
 DEMO_PASSWORD="$DEMO_PASSWORD" \
 DEMO_DISPLAY_NAME="$DEMO_DISPLAY_NAME" \
@@ -99,13 +105,17 @@ echo
 echo "════════════════════════════════════════════════════════════════"
 echo "  ✓ Cloud24 Exchange demo ready"
 echo "════════════════════════════════════════════════════════════════"
-echo "  Web URL:  http://localhost:8080"
-echo "  Email:    $DEMO_EMAIL"
-echo "  Password: $DEMO_PASSWORD"
-echo "  Role:     admin (admin panel visible)"
-echo "  Quota:    $QUOTA"
+echo "  Web URL:     http://localhost:8080"
+echo "  SOGo Web UI: http://localhost:8080/SOGo  (built-in webmail)"
+echo "  ActiveSync:  http://localhost:8080/Microsoft-Server-ActiveSync"
 echo ""
-echo "  Mail stack: Rspamd + ClamAV + OpenDKIM + OpenDMARC + Fail2ban"
+echo "  Email:       $DEMO_EMAIL"
+echo "  Password:    $DEMO_PASSWORD"
+echo "  Role:        admin (User Management panel visible)"
+echo "  Quota:       $QUOTA"
+echo ""
+echo "  Mail stack:  Rspamd + ClamAV + OpenDKIM + OpenDMARC + Fail2ban"
+echo "  Groupware:   SOGo (CalDAV + CardDAV + ActiveSync)"
 echo "════════════════════════════════════════════════════════════════"
 
 if [[ -n "$DKIM_RECORD" ]]; then
