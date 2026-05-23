@@ -1,6 +1,30 @@
 export interface AuthUser {
   email: string;
   displayName: string;
+  role: 'user' | 'admin';
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  displayName: string;
+  role: 'user' | 'admin';
+  quotaBytes: number;
+  isActive: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface AuditEntry {
+  id: string;
+  occurredAt: string;
+  actorEmail: string | null;
+  action: string;
+  target: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  result: 'success' | 'failure';
+  detail: Record<string, unknown>;
 }
 
 export interface Address {

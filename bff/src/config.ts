@@ -26,7 +26,10 @@ export const config = {
   port: num('PORT', 4000),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   sessionSecret: required('SESSION_SECRET', 'dev-secret-change-me'),
-  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:8080',
+  trustProxy: bool('TRUST_PROXY', false),
+  databaseUrl: process.env.DATABASE_URL ?? '',
+  redisUrl: process.env.REDIS_URL ?? '',
   imap: {
     host: required('IMAP_HOST', 'localhost'),
     port: num('IMAP_PORT', 143),

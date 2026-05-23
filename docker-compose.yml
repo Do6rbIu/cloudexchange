@@ -1,10 +1,56 @@
 name: cloudexchange
 
+# ────────────────────────────────────────────────────────────────────────
+# Base stack — runs in both dev and prod modes.
+# Production overrides live in docker-compose.prod.yml; the dev demo
+# (with seed data) is exposed via the `demo` compose profile.
+# ────────────────────────────────────────────────────────────────────────
+
 services:
   # ────────────────────────────────────────────────────────────────────
+  # PostgreSQL — application metadata
+  # users, audit_log, app_settings (and later: domains, aliases, quotas)
+  # ────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: cx-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cloudexchange}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cloudexchange-dev}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudexchange}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudexchange} -d ${POSTGRES_DB:-cloudexchange}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
+  # Redis — sessions, rate limits, pub/sub for future IDLE notifications
+  # ────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cx-redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
   # Mail backbone: Postfix (SMTP) + Dovecot (IMAP)
-  # Drop-in replacement for the equivalent role inside grommunio (gromox).
-  # In production, point BFF at a real grommunio host via env vars.
+  # In Phase 2 this gets Rspamd, ClamAV, OpenDKIM and SOGo bolted on.
   # ────────────────────────────────────────────────────────────────────
   mailserver:
     image: mailserver/docker-mailserver:14.0.0
@@ -20,44 +66,49 @@ services:
       - ENABLE_POSTGREY=0
       - ENABLE_AMAVIS=0
       - ENABLE_RSPAMD=0
+      - ENABLE_QUOTAS=1
       - PERMIT_DOCKER=connected-networks
       - SSL_TYPE=
       - POSTFIX_MESSAGE_SIZE_LIMIT=52428800
+      - OVERRIDE_HOSTNAME=mail.cloudexchange.local
       - LOG_LEVEL=info
-    ports:
-      - "1025:25"     # SMTP
-      - "1143:143"    # IMAP
-      - "1465:465"    # SMTPS (submission)
-      - "1587:587"    # Submission
-      - "1993:993"    # IMAPS
     volumes:
-      - ./infra/mail/data:/var/mail
-      - ./infra/mail/state:/var/mail-state
-      - ./infra/mail/logs:/var/log/mail
+      - mail-data:/var/mail
+      - mail-state:/var/mail-state
+      - mail-logs:/var/log/mail
       - ./infra/mail/config:/tmp/docker-mailserver
+    healthcheck:
+      test: ["CMD-SHELL", "ss -lntp | grep -q ':143' && ss -lntp | grep -q ':587'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     restart: unless-stopped
     networks:
       - cxnet
 
   # ────────────────────────────────────────────────────────────────────
   # Calendar + contacts: Radicale (CalDAV + CardDAV)
-  # Grommunio bundles the same protocols via gromox; this gives us the
-  # same wire-level interface in dev.
+  # Will be replaced by SOGo in Phase 2 for ActiveSync + scheduling.
   # ────────────────────────────────────────────────────────────────────
   radicale:
     image: tomsquest/docker-radicale:3.2.3.0
     container_name: cx-radicale
-    ports:
-      - "5232:5232"
     volumes:
-      - ./infra/radicale/data:/data
+      - radicale-data:/data
       - ./infra/radicale/config:/config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:5232/ -t 1 -T 2 || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
     networks:
       - cxnet
 
   # ────────────────────────────────────────────────────────────────────
-  # BFF — bridges browser ↔ mail backbone via IMAP/SMTP/CalDAV/CardDAV
+  # BFF — bridges browser ↔ mail backbone via IMAP/SMTP/CalDAV/CardDAV.
+  # Sessions live in Redis; admin metadata in Postgres.
   # ────────────────────────────────────────────────────────────────────
   bff:
     build:
@@ -68,6 +119,8 @@ services:
       - PORT=4000
       - NODE_ENV=production
       - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgres://${POSTGRES_USER:-cloudexchange}:${POSTGRES_PASSWORD:-cloudexchange-dev}@postgres:5432/${POSTGRES_DB:-cloudexchange}
       - IMAP_HOST=mailserver
       - IMAP_PORT=143
       - IMAP_SECURE=false
@@ -76,18 +129,23 @@ services:
       - SMTP_SECURE=false
       - CALDAV_URL=http://radicale:5232
       - CARDDAV_URL=http://radicale:5232
-      - CORS_ORIGIN=http://localhost:8080
-    ports:
-      - "4000:4000"
+      - CORS_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:8080}
+      - TRUST_PROXY=true
     depends_on:
-      - mailserver
-      - radicale
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailserver:
+        condition: service_started
+      radicale:
+        condition: service_started
     restart: unless-stopped
     networks:
       - cxnet
 
   # ────────────────────────────────────────────────────────────────────
-  # Frontend — Vite-built React/TS app served by nginx
+  # Frontend — Vite-built React/TS app served by an inner nginx
   # ────────────────────────────────────────────────────────────────────
   frontend:
     build:
@@ -98,8 +156,6 @@ services:
         VITE_DEMO_EMAIL: ${DEMO_EMAIL:-igor.petrov@cloudexchange.local}
         VITE_DEMO_PASSWORD: ${DEMO_PASSWORD:-cloud24demo}
     container_name: cx-frontend
-    ports:
-      - "8080:80"
     depends_on:
       - bff
     restart: unless-stopped
@@ -107,8 +163,28 @@ services:
       - cxnet
 
   # ────────────────────────────────────────────────────────────────────
-  # Demo data seeder — runs once to populate INBOX, contacts and events
-  # with realistic Cloud24 sample data. Enable with --profile demo.
+  # Edge proxy — single public entry-point for the whole stack.
+  # Phase 3 will add TLS termination via Certbot (acme.sh).
+  # ────────────────────────────────────────────────────────────────────
+  edge:
+    image: nginx:1.27-alpine
+    container_name: cx-edge
+    volumes:
+      - ./infra/edge/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/edge/conf.d:/etc/nginx/conf.d:ro
+    ports:
+      - "8080:80"
+      # "443:443" — enabled in Phase 3 once Certbot lands.
+    depends_on:
+      - bff
+      - frontend
+    restart: unless-stopped
+    networks:
+      - cxnet
+
+  # ────────────────────────────────────────────────────────────────────
+  # Demo data seeder — populates INBOX, Sent, contacts and events.
+  # Enable with: docker compose --profile demo run --rm seed
   # ────────────────────────────────────────────────────────────────────
   seed:
     build:
@@ -121,17 +197,30 @@ services:
       - IMAP_HOST=mailserver
       - IMAP_PORT=143
       - IMAP_SECURE=false
+      - SMTP_HOST=mailserver
+      - SMTP_PORT=587
+      - SMTP_SECURE=false
       - CALDAV_URL=http://radicale:5232
       - CARDDAV_URL=http://radicale:5232
       - DEMO_EMAIL=${DEMO_EMAIL:-igor.petrov@cloudexchange.local}
       - DEMO_PASSWORD=${DEMO_PASSWORD:-cloud24demo}
       - DEMO_DISPLAY_NAME=${DEMO_DISPLAY_NAME:-Игорь Петров}
     depends_on:
-      - mailserver
-      - radicale
+      mailserver:
+        condition: service_healthy
+      radicale:
+        condition: service_started
     restart: "no"
     networks:
       - cxnet
+
+volumes:
+  postgres-data:
+  redis-data:
+  mail-data:
+  mail-state:
+  mail-logs:
+  radicale-data:
 
 networks:
   cxnet:
