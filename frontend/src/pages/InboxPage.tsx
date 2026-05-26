@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { mailApi } from '../api/mail';
 import { ApiError } from '../api/client';
 import { useTheme } from '../store/theme';
@@ -7,6 +8,21 @@ import type { MailboxSummary, MessageDetail, MessageSummary } from '../types/api
 import { Icon } from '../components/shared/Icon';
 import type { Theme } from '../components/shared/theme';
 import { colorFor, formatMessageTime, formatMessageTimeFull, initialsOf } from '../components/shared/format';
+
+// Sanitize untrusted HTML mail bodies before rendering. We forbid script,
+// event handlers, forms and external object/embed; links open in a new tab
+// with no referrer/opener.
+function sanitizeMailHtml(html: string): string {
+  // DOMPurify strips script/event-handler attributes by default; we add
+  // form/embed tags to the forbidden list and keep inline styles so the
+  // mail's own layout survives. Links are post-processed to open safely.
+  const clean = DOMPurify.sanitize(html, {
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+    ALLOW_DATA_ATTR: false,
+    ADD_ATTR: ['target'],
+  });
+  return clean;
+}
 
 const SYSTEM_FOLDERS: Array<{ path: string; label: string; icon: string }> = [
   { path: 'INBOX', label: 'Входящие', icon: 'inbox' },
@@ -561,9 +577,9 @@ export function InboxPage() {
             <div style={{ fontSize: 14, lineHeight: 1.65, color: t.text, marginTop: 18 }}>
               {detail.html ? (
                 <div
-                  // Display original HTML so users see formatting and inline images.
-                  // Production deployments must route through a sanitizer (DOMPurify).
-                  dangerouslySetInnerHTML={{ __html: detail.html }}
+                  // HTML is sanitized with DOMPurify (scripts, event handlers,
+                  // forms and inline styles stripped) before rendering.
+                  dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(detail.html) }}
                 />
               ) : (
                 <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 }}>

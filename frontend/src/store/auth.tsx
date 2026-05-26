@@ -1,13 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { authApi, type LoginInput } from '../api/auth';
+import { api } from '../api/client';
 import type { AuthUser } from '../types/api';
 
 interface AuthContextValue {
   user: AuthUser | null;
-  status: 'loading' | 'authenticated' | 'anonymous';
+  status: 'loading' | 'authenticated' | 'anonymous' | 'twofa';
   error: string | null;
-  login: (input: LoginInput) => Promise<void>;
+  // Returns true if a 2FA challenge is now required.
+  login: (input: LoginInput) => Promise<boolean>;
+  completeTwoFa: (code: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -24,13 +27,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .me()
       .then((u) => {
         if (cancelled) return;
-        setUser(u);
+        setUser({ email: u.email, displayName: u.displayName, role: u.role });
         setStatus('authenticated');
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        setUser(null);
-        setStatus('anonymous');
+        // 401 with twofaRequired means a half-finished login is pending.
+        if (err?.data?.twofaRequired) {
+          setStatus('twofa');
+        } else {
+          setUser(null);
+          setStatus('anonymous');
+        }
       });
     return () => {
       cancelled = true;
@@ -41,8 +49,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const res = await authApi.login(input);
-      setUser(res.user);
-      setStatus('authenticated');
+      if (res.twofaRequired) {
+        setStatus('twofa');
+        return true;
+      }
+      if (res.user) {
+        setUser(res.user);
+        setStatus('authenticated');
+      }
+      return false;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
       setError(msg);
@@ -50,15 +65,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const completeTwoFa = useCallback(async (code: string) => {
+    setError(null);
+    try {
+      const res = await authApi.loginTwoFa(code);
+      setUser(res.user);
+      setStatus('authenticated');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Неверный код';
+      setError(msg);
+      throw err;
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     await authApi.logout().catch(() => undefined);
+    api.resetCsrf();
     setUser(null);
     setStatus('anonymous');
   }, []);
 
   const value = useMemo(
-    () => ({ user, status, error, login, logout }),
-    [user, status, error, login, logout],
+    () => ({ user, status, error, login, completeTwoFa, logout }),
+    [user, status, error, login, completeTwoFa, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

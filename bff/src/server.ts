@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import session from '@fastify/session';
 import type { SessionStore } from '@fastify/session';
+import rateLimit from '@fastify/rate-limit';
 import RedisStore from 'connect-redis';
 import { config } from './config.js';
 import { authRoutes } from './routes/auth.js';
@@ -10,13 +11,16 @@ import { mailRoutes } from './routes/mail.js';
 import { calendarRoutes } from './routes/calendar.js';
 import { contactsRoutes } from './routes/contacts.js';
 import { adminRoutes } from './routes/admin.js';
+import { twofaRoutes } from './routes/twofa.js';
 import { dbHealthy } from './db/pool.js';
 import { redis, redisHealthy } from './db/redis.js';
-import type { SessionUser } from './types/session.js';
+import type { Pending2FA, SessionUser } from './types/session.js';
 
 declare module 'fastify' {
   interface Session {
     user?: SessionUser;
+    pending2fa?: Pending2FA;
+    csrfToken?: string;
   }
 }
 
@@ -61,6 +65,37 @@ await app.register(session, {
   rolling: true,
 });
 
+// Per-IP rate limiting backed by Redis. Auth routes get a tighter limit
+// applied locally (see routes/auth.ts); this is the global ceiling.
+await app.register(rateLimit, {
+  global: true,
+  max: 300,
+  timeWindow: '1 minute',
+  redis: redis(),
+  keyGenerator: (req) => req.ip,
+  errorResponseBuilder: () => ({
+    error: 'TooManyRequests',
+    message: 'Слишком много запросов, попробуйте позже',
+  }),
+});
+
+// CSRF protection — synchronizer token pattern. GET /api/auth/csrf issues
+// a per-session token; every mutating request must echo it in the
+// x-csrf-token header. SameSite=lax cookies already block most cross-site
+// POSTs; this is defense-in-depth.
+const CSRF_EXEMPT = new Set(['/api/auth/csrf', '/api/health']);
+app.addHook('preHandler', async (request, reply) => {
+  const method = request.method;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
+  const path = request.url.split('?')[0];
+  if (CSRF_EXEMPT.has(path)) return;
+  const sent = request.headers['x-csrf-token'];
+  const expected = request.session.csrfToken;
+  if (!expected || typeof sent !== 'string' || sent !== expected) {
+    reply.status(403).send({ error: 'CSRF', message: 'Invalid or missing CSRF token' });
+  }
+});
+
 app.get('/api/health', async () => {
   const [dbOk, redisOk] = await Promise.all([dbHealthy(), redisHealthy()]);
   return {
@@ -72,6 +107,7 @@ app.get('/api/health', async () => {
 });
 
 await app.register(authRoutes, { prefix: '/api/auth' });
+await app.register(twofaRoutes, { prefix: '/api/auth/2fa' });
 await app.register(mailRoutes, { prefix: '/api/mail' });
 await app.register(calendarRoutes, { prefix: '/api/calendar' });
 await app.register(contactsRoutes, { prefix: '/api/contacts' });

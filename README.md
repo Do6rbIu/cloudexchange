@@ -169,11 +169,17 @@ docker compose up -d mailserver radicale
 карта по этапам (Phase 0 → Phase 9) расписана в
 [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
 
-Текущее состояние — **Phase 1 завершён** (production foundation):
-PostgreSQL, Redis, nginx-edge, BFF stateless с Redis-сессиями, аудит-лог,
-схема пользователей и role-based авторизация (есть админ-страница).
+Готовы: **Phase 1** (Postgres/Redis/edge/аудит/роли), **Phase 2**
+(Rspamd, ClamAV, OpenDKIM, OpenDMARC, Fail2ban, server-side search),
+**Phase 2.5** (SOGo: CalDAV/CardDAV/ActiveSync + управление пользователями),
+**Phase 3a** (TLS на всём стеке), **Phase 3b** (2FA TOTP, CSRF,
+rate-limiting, DOMPurify-санитизация).
 
-Дальше: Phase 2 — полный mail-стек (Rspamd, ClamAV, OpenDKIM, SOGo).
+Подробности по безопасности — [`docs/SECURITY.md`](docs/SECURITY.md),
+по TLS — [`docs/TLS.md`](docs/TLS.md).
+
+Дальше: Phase 4 — real-time (IMAP IDLE → WebSocket) и полнотекстовый
+индекс (Manticore).
 
 ## Что не входит в Phase 1
 

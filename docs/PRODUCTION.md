@@ -146,15 +146,17 @@ end-to-end и было пригодно для презентации.
 - [ ] Автоматический HTTP→HTTPS redirect (вкл. вручную для prod)
 
 ### Phase 3b · Identity & app security
-**Status: planned · risk: medium**
+**Status: this commit · risk: medium**
 
-- [ ] Fail2ban: блок по IMAP/SMTP/HTTP auth failures
-- [ ] Двухфакторная аутентификация (TOTP) для веб-логина
-- [ ] OAuth2/OIDC sign-in (Keycloak или Authentik) как опция
-- [ ] CSRF-токены в BFF
-- [ ] Rate-limiting в Redis (per-IP и per-user)
-- [ ] DOMPurify санитизация HTML писем на фронтенде
+- [x] Двухфакторная аутентификация (TOTP) для веб-логина, с QR + резервными кодами
+- [x] TOTP-секреты шифруются AES-256-GCM, backup-коды хешируются
+- [x] CSRF-токены в BFF (synchronizer-token, авто-прикрепление на клиенте)
+- [x] Rate-limiting в Redis (глобальный per-IP + жёсткий на auth-роутах)
+- [x] DOMPurify санитизация HTML писем на фронтенде
+- [x] Fail2ban на IMAP/SMTP *(Phase 2)* + rate-limit на веб-логине
 - [x] Audit log: все админ-действия и логины пишутся в Postgres *(Phase 1)*
+- [ ] OAuth2/OIDC sign-in (Keycloak или Authentik) как опция *(Phase 3+)*
+- [ ] WebAuthn / passkeys *(Phase 3+)*
 
 ### Phase 4 · Real-time + search
 **Status: planned · risk: medium**

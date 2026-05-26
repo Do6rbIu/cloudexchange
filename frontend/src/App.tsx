@@ -50,7 +50,7 @@ export function App() {
   const location = useLocation();
 
   useEffect(() => {
-    if (status === 'anonymous' && location.pathname !== '/login') {
+    if ((status === 'anonymous' || status === 'twofa') && location.pathname !== '/login') {
       navigate('/login', { replace: true, state: { from: location.pathname } });
     }
   }, [status, location.pathname, navigate]);

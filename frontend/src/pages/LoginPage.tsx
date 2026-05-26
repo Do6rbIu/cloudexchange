@@ -9,7 +9,7 @@ const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD ?? '';
 const HAS_DEMO = Boolean(DEMO_EMAIL && DEMO_PASSWORD);
 
 export function LoginPage() {
-  const { login, status } = useAuth();
+  const { login, completeTwoFa, status } = useAuth();
   const { theme: t, dark, toggle } = useTheme();
   const navigate = useNavigate();
   const [email, setEmail] = useState(HAS_DEMO ? DEMO_EMAIL : '');
@@ -17,6 +17,7 @@ export function LoginPage() {
   const [displayName, setDisplayName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [twofaCode, setTwofaCode] = useState('');
 
   if (status === 'authenticated') {
     navigate('/inbox', { replace: true });
@@ -27,8 +28,11 @@ export function LoginPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await login({ email: emailValue, password: passwordValue, displayName: nameValue });
-      navigate('/inbox', { replace: true });
+      const twofaRequired = await login({ email: emailValue, password: passwordValue, displayName: nameValue });
+      if (!twofaRequired) {
+        navigate('/inbox', { replace: true });
+      }
+      // Otherwise the component re-renders into the 2FA challenge (status === 'twofa').
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось войти');
     } finally {
@@ -43,6 +47,33 @@ export function LoginPage() {
 
   async function onDemoClick() {
     await submitWith(DEMO_EMAIL, DEMO_PASSWORD, 'Игорь Петров');
+  }
+
+  async function onTwoFaSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await completeTwoFa(twofaCode);
+      navigate('/inbox', { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Неверный код');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (status === 'twofa') {
+    return (
+      <TwoFaChallenge
+        t={t}
+        code={twofaCode}
+        setCode={setTwofaCode}
+        onSubmit={onTwoFaSubmit}
+        submitting={submitting}
+        error={error}
+      />
+    );
   }
 
   return (
@@ -290,4 +321,96 @@ function inputStyle(t: ReturnType<typeof useTheme>['theme']): React.CSSPropertie
     color: t.text,
     outline: 'none',
   };
+}
+
+function TwoFaChallenge({
+  t,
+  code,
+  setCode,
+  onSubmit,
+  submitting,
+  error,
+}: {
+  t: ReturnType<typeof useTheme>['theme'];
+  code: string;
+  setCode: (v: string) => void;
+  onSubmit: (e: FormEvent) => void;
+  submitting: boolean;
+  error: string | null;
+}) {
+  return (
+    <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: t.bg, color: t.text }}>
+      <form
+        onSubmit={onSubmit}
+        style={{
+          width: '100%',
+          maxWidth: 360,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          padding: 32,
+          background: t.surface,
+          border: `1px solid ${t.border}`,
+          borderRadius: 14,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: t.accent }}>
+          <Icon name="shield" size={22} />
+          <span style={{ fontSize: 12, letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase' }}>
+            Двухфакторная защита
+          </span>
+        </div>
+        <h2 style={{ fontSize: 22, margin: 0, letterSpacing: -0.4 }}>Введите код</h2>
+        <p style={{ fontSize: 13, color: t.textMuted, margin: 0, lineHeight: 1.5 }}>
+          Откройте приложение-аутентификатор (Google Authenticator, Aegis, 1Password)
+          и введите 6-значный код. Можно использовать резервный код.
+        </p>
+        <input
+          autoFocus
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="000000"
+          style={{
+            ...inputStyle(t),
+            fontSize: 24,
+            letterSpacing: 8,
+            textAlign: 'center',
+            fontFamily: 'JetBrains Mono, monospace',
+          }}
+        />
+        {error && (
+          <div
+            style={{
+              fontSize: 13,
+              color: t.danger,
+              background: 'rgba(192,57,43,0.12)',
+              padding: '10px 12px',
+              borderRadius: 8,
+            }}
+          >
+            {error}
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={submitting || code.length < 6}
+          style={{
+            padding: '12px 16px',
+            fontSize: 14,
+            fontWeight: 600,
+            color: '#FFF',
+            background: submitting ? t.textDim : t.accent,
+            border: 'none',
+            borderRadius: 8,
+            cursor: submitting ? 'progress' : 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          {submitting ? 'Проверяем…' : 'Подтвердить'}
+        </button>
+      </form>
+    </div>
+  );
 }
