@@ -29,6 +29,9 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
 
+echo "▸ Ensuring TLS certificate exists (self-signed for dev)"
+"$ROOT_DIR/scripts/gen-dev-certs.sh"
+
 echo "▸ Building and starting core stack"
 docker compose up -d --build postgres redis memcached mailserver sogo bff frontend edge
 
@@ -105,9 +108,10 @@ echo
 echo "════════════════════════════════════════════════════════════════"
 echo "  ✓ Cloud24 Exchange demo ready"
 echo "════════════════════════════════════════════════════════════════"
-echo "  Web URL:     http://localhost:8080"
-echo "  SOGo Web UI: http://localhost:8080/SOGo  (built-in webmail)"
-echo "  ActiveSync:  http://localhost:8080/Microsoft-Server-ActiveSync"
+echo "  Web URL:     https://localhost:8443  (or http://localhost:8080)"
+echo "  SOGo Web UI: https://localhost:8443/SOGo  (built-in webmail)"
+echo "  ActiveSync:  https://localhost:8443/Microsoft-Server-ActiveSync"
+echo "               (self-signed cert — accept the browser warning once)"
 echo ""
 echo "  Email:       $DEMO_EMAIL"
 echo "  Password:    $DEMO_PASSWORD"

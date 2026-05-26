@@ -133,18 +133,28 @@ end-to-end и было пригодно для презентации.
 - [ ] LDAP-провизионер вместо docker socket *(Phase 3+)*
 - [ ] Password change endpoint через UI *(Phase 5)*
 
-### Phase 3 · TLS, identity, security
+### Phase 3a · TLS
+**Status: this commit · risk: low**
+
+- [x] Edge-nginx терминирует TLS на :443 (HTTP/2, TLS 1.2/1.3)
+- [x] Self-signed серт для dev (`scripts/gen-dev-certs.sh`)
+- [x] Общий серт переиспользуется mailserver (IMAPS/SMTPS) и SOGo
+- [x] HSTS + hardened security headers на HTTPS
+- [x] ACME HTTP-01 challenge webroot готов для Let's Encrypt
+- [x] certbot-сервис под profile `letsencrypt` + docs/TLS.md
+- [x] Порты настраиваются (`HTTP_PORT`/`HTTPS_PORT`)
+- [ ] Автоматический HTTP→HTTPS redirect (вкл. вручную для prod)
+
+### Phase 3b · Identity & app security
 **Status: planned · risk: medium**
 
-- [ ] Let's Encrypt через acme.sh с DNS-01 (или HTTP-01 через nginx)
-- [ ] Автообновление сертификатов
 - [ ] Fail2ban: блок по IMAP/SMTP/HTTP auth failures
 - [ ] Двухфакторная аутентификация (TOTP) для веб-логина
 - [ ] OAuth2/OIDC sign-in (Keycloak или Authentik) как опция
 - [ ] CSRF-токены в BFF
 - [ ] Rate-limiting в Redis (per-IP и per-user)
 - [ ] DOMPurify санитизация HTML писем на фронтенде
-- [ ] Audit log: все админ-действия и логины пишутся в Postgres
+- [x] Audit log: все админ-действия и логины пишутся в Postgres *(Phase 1)*
 
 ### Phase 4 · Real-time + search
 **Status: planned · risk: medium**

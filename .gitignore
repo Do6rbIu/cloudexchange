@@ -15,3 +15,8 @@ infra/mail/config/postfix-accounts.cf
 infra/mail/config/postfix-virtual.cf
 infra/mail/config/dovecot-quotas.cf
 infra/radicale/data/
+
+# TLS material — never commit private keys / certs
+infra/edge/certs/*.pem
+infra/edge/certs/*.key
+infra/edge/certs/*.crt
